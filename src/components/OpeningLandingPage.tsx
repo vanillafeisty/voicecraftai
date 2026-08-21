@@ -108,7 +108,6 @@ export const OpeningLandingPage: React.FC<OpeningLandingPageProps> = ({
         body: JSON.stringify({
           text,
           voice,
-          engine: 'studio',
         }),
       });
 

@@ -83,83 +83,124 @@ async function startServer() {
     geminiVoice: string;
     tonePrompt: string;
     sampleLine: string;
+    category: string;
+    isHumanized?: boolean;
   }> = {
-    Priya: {
+    // 🇮🇳 INDIAN VOICES
+    Ananya: {
       langTag: "en-IN",
       geminiVoice: "Aoede",
-      tonePrompt: "warm, flowing, articulate Indian English voice",
-      sampleLine: "Good morning. Here is the operational summary for our upcoming quarterly milestones.",
+      tonePrompt: "Perform as an ultra-natural, emotionally expressive, warm Indian English human storyteller with delicate breath pauses, natural conversational rhythm, and lifelike warmth without any robotic monotony",
+      sampleLine: "The old monsoon rains swept through the quiet courtyard, carrying the scent of wet jasmine and long-forgotten memories.",
+      category: "Storytelling",
+      isHumanized: true,
     },
-    Kavita: {
+    Kabir: {
       langTag: "en-IN",
-      geminiVoice: "Kore",
-      tonePrompt: "stern, commanding, crisp, authoritative, professional Indian English corporate executive",
-      sampleLine: "Compliance protocols must be followed strictly across all enterprise deployments without exception.",
+      geminiVoice: "Puck",
+      tonePrompt: "Perform as a soulful, warm, evocative, and dramatic Indian English male storyteller with natural human pauses and poetic phrasing",
+      sampleLine: "Beyond the high mountain passes where the wind sings ancient ballads, a solitary traveler paused beneath the starlit sky.",
+      category: "Storytelling",
+      isHumanized: true,
     },
     Deepa: {
       langTag: "en-IN",
       geminiVoice: "Aoede",
-      tonePrompt: "gentle, soothing, articulate Indian English instructional voice",
-      sampleLine: "Please review the following documentation carefully to ensure a seamless onboarding experience.",
+      tonePrompt: "Speak in a gentle, soothing, warm, and atmospheric Indian English bedtime audiobook voice",
+      sampleLine: "Close your eyes and breathe gently as the evening settles peacefully over the silent valley.",
+      category: "Storytelling",
+    },
+    Rohan: {
+      langTag: "en-IN",
+      geminiVoice: "Zephyr",
+      tonePrompt: "Perform in a vibrant, animated, playful, and dynamic Indian English storytelling narrator voice",
+      sampleLine: "With a sudden flash of brilliant light, the ancient clockwork gears began turning for the first time in three centuries!",
+      category: "Storytelling",
     },
     Aarav: {
       langTag: "en-IN",
       geminiVoice: "Puck",
-      tonePrompt: "confident, resonant, articulate Indian English professional narrator",
-      sampleLine: "Our financial forecasts indicate strong, sustainable growth across all digital infrastructure sectors.",
+      tonePrompt: "Narrate in a deep, resonant, natural, and authoritative Indian English documentary narrative voice",
+      sampleLine: "Our comprehensive economic investigation traces the evolution of digital finance across emerging markets.",
+      category: "Narrative",
+    },
+    Kavita: {
+      langTag: "en-IN",
+      geminiVoice: "Kore",
+      tonePrompt: "Deliver as an authoritative, commanding, crisp, and professional Indian English broadcast journalist",
+      sampleLine: "Reporting from the national summit on cybersecurity protocols and cross-border regulatory governance.",
+      category: "Narrative",
+    },
+    Priya: {
+      langTag: "en-IN",
+      geminiVoice: "Aoede",
+      tonePrompt: "Speak in a clear, structured, articulate, and flowing Indian English corporate explainer tone",
+      sampleLine: "The user interface architecture is structured around modular event streams and real-time state synchronizers.",
+      category: "Descriptive",
     },
     Vikram: {
       langTag: "en-IN",
       geminiVoice: "Charon",
-      tonePrompt: "stern, commanding, disciplined, authoritative Indian English executive director",
-      sampleLine: "Immediate attention to detail and strict deadline execution are non-negotiable standards.",
+      tonePrompt: "Deliver in a stern, disciplined, commanding, and authoritative Indian English executive director cadence",
+      sampleLine: "Standard operating procedures require rigorous verification before launching mission-critical infrastructure.",
+      category: "Descriptive",
     },
-    Rohan: {
-      langTag: "en-IN",
-      geminiVoice: "Puck",
-      tonePrompt: "modern, upbeat, dynamic Indian English presenter",
-      sampleLine: "Let us explore the core architecture powering our real-time speech synthesis engine.",
-    },
-    Sarah: {
+
+    // 🌐 INTERNATIONAL VOICES
+    Oliver: {
       langTag: "en-US",
-      geminiVoice: "Aoede",
-      tonePrompt: "flowing, polished, natural conversational International broadcast voice",
-      sampleLine: "Welcome to today’s global intelligence briefing covering artificial intelligence breakthroughs.",
+      geminiVoice: "Puck",
+      tonePrompt: "Speak as an ultra-realistic, warm, cinematic human storyteller with lifelike breathing and emotional pacing without computerization",
+      sampleLine: "In the quiet stillness of the autumn woods, he found an old wooden cabin that had weathered decades of winter storms.",
+      category: "Storytelling",
+      isHumanized: true,
     },
     Eleanor: {
       langTag: "en-GB",
       geminiVoice: "Kore",
-      tonePrompt: "stern, crisp, authoritative British / International corporate director",
-      sampleLine: "All regulatory directives take effect immediately and require comprehensive departmental verification.",
-    },
-    Kore: {
-      langTag: "en-CA",
-      geminiVoice: "Kore",
-      tonePrompt: "neutral, crisp, articulate International studio voice",
-      sampleLine: "System diagnostic complete. All parameters are functioning within optimal thresholds.",
-    },
-    Arthur: {
-      langTag: "en-GB",
-      geminiVoice: "Charon",
-      tonePrompt: "stern, firm, commanding, authoritative British / International corporate executive",
-      sampleLine: "Strict adherence to security governance is required across all operational divisions.",
+      tonePrompt: "Read with a prestigious, expressive, dramatic British classical literature narrator voice",
+      sampleLine: "It is a truth universally acknowledged, that a single thought held with conviction can alter the fate of an empire.",
+      category: "Storytelling",
     },
     Fenrir: {
       langTag: "en-US",
       geminiVoice: "Fenrir",
-      tonePrompt: "deep, commanding, resonant baritone International voice",
-      sampleLine: "Standing by for mission-critical briefing and strategic deployment parameters.",
+      tonePrompt: "Narrate in a deep, steady, commanding, resonant baritone documentary broadcast voice",
+      sampleLine: "From the depths of uncharted oceans to the outer frontiers of our solar system, humanity continues its relentless pursuit of discovery.",
+      category: "Narrative",
+    },
+    Sarah: {
+      langTag: "en-US",
+      geminiVoice: "Aoede",
+      tonePrompt: "Deliver as a bright, polished, engaging, flowing international broadcast news anchor",
+      sampleLine: "Good evening. Tonight’s lead report focuses on major breakthroughs in generative artificial intelligence and neural computing.",
+      category: "Narrative",
     },
     James: {
       langTag: "en-AU",
+      geminiVoice: "Zephyr",
+      tonePrompt: "Narrate in a smooth, classic, flowing Australian/International broadcaster baritone",
+      sampleLine: "Welcome to this week’s international dispatch, examining ecological preservation across coastal coral reefs.",
+      category: "Narrative",
+    },
+    Kore: {
+      langTag: "en-CA",
+      geminiVoice: "Kore",
+      tonePrompt: "Speak in a crisp, neutral, articulate studio descriptive explainer delivery",
+      sampleLine: "The automated diagnostic cycle has finished. All internal data pipelines are operating within nominal specifications.",
+      category: "Descriptive",
+    },
+    Arthur: {
+      langTag: "en-GB",
       geminiVoice: "Charon",
-      tonePrompt: "smooth, classic, flowing International broadcast news anchor",
-      sampleLine: "Reporting live from the economic forum with today’s key market and technology highlights.",
+      tonePrompt: "Deliver in a stern, commanding British executive director voice with crisp acoustic definition",
+      sampleLine: "Strict adherence to security governance and risk containment frameworks is mandatory across all global branches.",
+      category: "Descriptive",
     },
   };
 
   /**
-   * High-fidelity zero-quota speech synthesis engine.
+   * High-fidelity zero-quota speech synthesis engine fallback.
    * Generates authentic, crystal-clear spoken voice audio (MP3) with native accent support.
    */
   async function generateStudioVoiceFallback(text: string, voice = "Priya"): Promise<{ audioBuffer: Buffer; mimeType: string; durationSeconds: number }> {
@@ -209,6 +250,8 @@ async function startServer() {
         langTag: cfg.langTag,
         tone: cfg.tonePrompt,
         sampleLine: cfg.sampleLine,
+        category: cfg.category,
+        isHumanized: cfg.isHumanized || false,
       })),
     });
   });
@@ -243,17 +286,16 @@ async function startServer() {
         });
       }
 
-      // Attempt high-fidelity Gemini Native TTS
+      // Attempt high-fidelity Gemini Native TTS with gemini-3.1-flash-tts-preview
       try {
         const ai = getGeminiClient();
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-3.1-flash-tts-preview",
           contents: [
             {
-              role: "user",
               parts: [
                 {
-                  text: `Please speak the following text in a ${voiceConfig.tonePrompt} with clean pronunciation:\n\n${text}`,
+                  text: `${voiceConfig.tonePrompt}:\n\n${text}`,
                 },
               ],
             },

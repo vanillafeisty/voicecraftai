@@ -88,7 +88,6 @@ export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
         body: JSON.stringify({
           text,
           voice,
-          engine: 'studio',
         }),
       });
 

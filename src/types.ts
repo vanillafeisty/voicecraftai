@@ -1,6 +1,16 @@
 export type VoiceRegion = 'Indian' | 'International';
 export type VoiceGender = 'Female' | 'Male';
-export type VoiceTone = 'Stern & Firm' | 'Flowing & Warm' | 'Authoritative' | 'Corporate Direct' | 'Smooth Broadcast' | 'Articulate & Gentle';
+export type VoiceCategory = 'Descriptive' | 'Narrative' | 'Storytelling';
+export type VoiceTone = 
+  | 'Stern & Firm' 
+  | 'Flowing & Warm' 
+  | 'Authoritative' 
+  | 'Corporate Direct' 
+  | 'Smooth Broadcast' 
+  | 'Articulate & Gentle'
+  | 'Ultra-Humanized & Soulful'
+  | 'Ultra-Humanized & Dramatic'
+  | 'Ultra-Humanized & Warm';
 
 export type VoiceName = 
   | 'Priya' 
@@ -8,13 +18,16 @@ export type VoiceName =
   | 'Deepa' 
   | 'Aarav' 
   | 'Vikram' 
-  | 'Rohan' 
+  | 'Rohan'
+  | 'Ananya'
+  | 'Kabir'
   | 'Sarah' 
   | 'Eleanor' 
   | 'Kore' 
   | 'Arthur' 
   | 'Fenrir' 
-  | 'James';
+  | 'James'
+  | 'Oliver';
 
 export type AudioEngine = 'gemini' | 'studio' | 'browser';
 
@@ -23,6 +36,7 @@ export interface VoiceOption {
   name: string;
   gender: VoiceGender;
   region: VoiceRegion;
+  category: VoiceCategory;
   accent: string;
   description: string;
   styleTag: string;
@@ -30,6 +44,7 @@ export interface VoiceOption {
   sampleLine: string;
   pitch: number; // playback pitch modifier
   rate: number;  // playback rate modifier
+  isHumanized?: boolean; // Ultra-realistic human cadence (non-computerized)
 }
 
 export type ContextPresetId = 

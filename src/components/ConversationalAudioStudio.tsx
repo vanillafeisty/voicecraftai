@@ -20,7 +20,7 @@ import {
   VolumeX,
   Radio
 } from 'lucide-react';
-import { VoiceName, VoiceRegion, VoiceGender, VoiceOption, ConversationMessage } from '../types';
+import { VoiceName, VoiceRegion, VoiceGender, VoiceCategory, VoiceOption, ConversationMessage } from '../types';
 import { VOICE_OPTIONS, downloadAudioFile, formatTime, downloadText } from '../utils/audioUtils';
 import { ShareAudioModal } from './ShareAudioModal';
 
@@ -53,8 +53,9 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
   const [inputText, setInputText] = useState<string>(initialText || '');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
-  // Voice Filtering State (Indian / International & Gender)
+  // Voice Filtering State (Indian / International, Category & Gender)
   const [selectedRegion, setSelectedRegion] = useState<VoiceRegion>('Indian');
+  const [selectedCategory, setSelectedCategory] = useState<VoiceCategory | 'All'>('All');
   const [selectedGender, setSelectedGender] = useState<VoiceGender | 'All'>('All');
 
   // Sample voice preview state
@@ -85,11 +86,12 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   const hasAutoRunRef = useRef<boolean>(false);
 
-  // Filter voices according to current region and gender
+  // Filter voices according to current region, category, and gender
   const filteredVoices = VOICE_OPTIONS.filter((v) => {
     const matchesRegion = v.region === selectedRegion;
     const matchesGender = selectedGender === 'All' || v.gender === selectedGender;
-    return matchesRegion && matchesGender;
+    const matchesCategory = selectedCategory === 'All' || v.category === selectedCategory;
+    return matchesRegion && matchesGender && matchesCategory;
   });
 
   // Auto-generate welcome audio on first load
@@ -135,7 +137,6 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
         body: JSON.stringify({
           text: text.trim(),
           voice: voiceName,
-          engine: 'studio',
         }),
       });
 
@@ -255,7 +256,6 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
         body: JSON.stringify({
           text: voice.sampleLine,
           voice: voice.id,
-          engine: 'studio',
         }),
       });
 
@@ -453,7 +453,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
 
       {/* Voice Selection & Filter Strip */}
       <div className="bg-slate-900/95 rounded-3xl border border-slate-800 p-4 sm:p-5 shadow-lg space-y-4">
-        {/* Category Filters: Region & Gender */}
+        {/* Top Filter Bar: Region & Gender & Categories */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
           {/* Region Tabs (Indian vs International) */}
           <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800">
@@ -461,8 +461,8 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
               id="filter-region-indian"
               onClick={() => {
                 setSelectedRegion('Indian');
-                if (!['Priya', 'Kavita', 'Deepa', 'Aarav', 'Vikram', 'Rohan'].includes(selectedVoice)) {
-                  onSelectVoice('Priya');
+                if (!['Ananya', 'Kabir', 'Deepa', 'Rohan', 'Aarav', 'Kavita', 'Priya', 'Vikram'].includes(selectedVoice)) {
+                  onSelectVoice('Ananya');
                 }
               }}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
@@ -471,14 +471,14 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <span>🇮🇳 Indian Voices (6)</span>
+              <span>🇮🇳 Indian Voices (8)</span>
             </button>
             <button
               id="filter-region-intl"
               onClick={() => {
                 setSelectedRegion('International');
-                if (!['Sarah', 'Eleanor', 'Kore', 'Arthur', 'Fenrir', 'James'].includes(selectedVoice)) {
-                  onSelectVoice('Sarah');
+                if (!['Oliver', 'Eleanor', 'Fenrir', 'Sarah', 'James', 'Kore', 'Arthur'].includes(selectedVoice)) {
+                  onSelectVoice('Oliver');
                 }
               }}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
@@ -488,7 +488,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
               }`}
             >
               <Globe className="w-3.5 h-3.5" />
-              <span>🌐 International (6)</span>
+              <span>🌐 International (7)</span>
             </button>
           </div>
 
@@ -505,10 +505,69 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {g === 'All' ? 'All' : g === 'Female' ? '👩 Female' : '👨 Male'}
+                {g === 'All' ? 'All Genders' : g === 'Female' ? '👩 Female' : '👨 Male'}
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Category Filters: Descriptive, Narrative, Storytelling */}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <span className="text-xs font-semibold text-slate-400 mr-1 flex items-center gap-1">
+            <Volume2 className="w-3.5 h-3.5 text-teal-400" />
+            <span>Voice Category:</span>
+          </span>
+
+          <button
+            id="filter-cat-all"
+            onClick={() => setSelectedCategory('All')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              selectedCategory === 'All'
+                ? 'bg-teal-500 text-slate-950 shadow-md'
+                : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+            }`}
+          >
+            🌟 All Categories
+          </button>
+
+          <button
+            id="filter-cat-storytelling"
+            onClick={() => setSelectedCategory('Storytelling')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              selectedCategory === 'Storytelling'
+                ? 'bg-amber-500 text-slate-950 shadow-md'
+                : 'bg-slate-950 text-slate-400 hover:text-amber-300 border border-slate-800'
+            }`}
+          >
+            <span>📖 Storytelling</span>
+            <span className="text-[10px] opacity-80">(Real Humanized)</span>
+          </button>
+
+          <button
+            id="filter-cat-narrative"
+            onClick={() => setSelectedCategory('Narrative')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              selectedCategory === 'Narrative'
+                ? 'bg-cyan-500 text-slate-950 shadow-md'
+                : 'bg-slate-950 text-slate-400 hover:text-cyan-300 border border-slate-800'
+            }`}
+          >
+            <span>🎙️ Narrative</span>
+            <span className="text-[10px] opacity-80">(Documentary & News)</span>
+          </button>
+
+          <button
+            id="filter-cat-descriptive"
+            onClick={() => setSelectedCategory('Descriptive')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              selectedCategory === 'Descriptive'
+                ? 'bg-purple-500 text-slate-950 shadow-md'
+                : 'bg-slate-950 text-slate-400 hover:text-purple-300 border border-slate-800'
+            }`}
+          >
+            <span>📋 Descriptive</span>
+            <span className="text-[10px] opacity-80">(Briefings & Explainer)</span>
+          </button>
         </div>
 
         {/* Voice Cards Grid with Sample Previews */}
@@ -524,27 +583,43 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                 onClick={() => handleSelectVoiceAndAutoGenerate(v)}
                 className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-2.5 group relative ${
                   isSelected
-                    ? 'bg-teal-950/25 border-teal-500 text-teal-100 shadow-lg shadow-teal-500/10 ring-1 ring-teal-500/50'
+                    ? 'bg-teal-950/30 border-teal-500 text-teal-100 shadow-lg shadow-teal-500/15 ring-1 ring-teal-500/50'
+                    : v.isHumanized
+                    ? 'bg-slate-950/80 hover:bg-slate-850 border-amber-500/30 text-slate-300 hover:border-amber-400/60 shadow-sm'
                     : 'bg-slate-950/70 hover:bg-slate-850 border-slate-800 text-slate-300 hover:border-slate-700'
                 }`}
               >
-                {/* Top Row: Name, Gender, Tone Badge */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-base text-white group-hover:text-teal-300">
-                      {v.name}
-                    </span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
-                      v.gender === 'Female' 
-                        ? 'bg-pink-950/60 text-pink-300 border-pink-800/50' 
-                        : 'bg-blue-950/60 text-blue-300 border-blue-800/50'
-                    }`}>
-                      {v.gender}
-                    </span>
+                {/* Top Row: Name, Badges & Category */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-base text-white group-hover:text-teal-300">
+                        {v.name}
+                      </span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
+                        v.gender === 'Female' 
+                          ? 'bg-pink-950/60 text-pink-300 border-pink-800/50' 
+                          : 'bg-blue-950/60 text-blue-300 border-blue-800/50'
+                      }`}>
+                        {v.gender}
+                      </span>
+                      {v.isHumanized && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-teal-500/20 text-amber-300 border border-amber-500/50 shadow-sm animate-pulse">
+                          ✨ Real Humanized
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                      <span className="px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/60 font-medium text-slate-300">
+                        {v.category}
+                      </span>
+                      <span>•</span>
+                      <span>{v.accent}</span>
+                    </div>
                   </div>
 
                   {/* Tone Badge */}
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${getToneBadgeStyle(v.tone)}`}>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${getToneBadgeStyle(v.tone)}`}>
                     {v.tone}
                   </span>
                 </div>

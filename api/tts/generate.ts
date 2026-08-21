@@ -14,18 +14,24 @@ interface ApiResponse {
 }
 
 const VOICE_BACKEND_CONFIGS: Record<string, { langTag: string }> = {
-  Priya: { langTag: "en-IN" },
-  Kavita: { langTag: "en-IN" },
+  // 🇮🇳 Indian
+  Ananya: { langTag: "en-IN" },
+  Kabir: { langTag: "en-IN" },
   Deepa: { langTag: "en-IN" },
-  Aarav: { langTag: "en-IN" },
-  Vikram: { langTag: "en-IN" },
   Rohan: { langTag: "en-IN" },
-  Sarah: { langTag: "en-US" },
+  Aarav: { langTag: "en-IN" },
+  Kavita: { langTag: "en-IN" },
+  Priya: { langTag: "en-IN" },
+  Vikram: { langTag: "en-IN" },
+
+  // 🌐 International
+  Oliver: { langTag: "en-US" },
   Eleanor: { langTag: "en-GB" },
+  Fenrir: { langTag: "en-US" },
+  Sarah: { langTag: "en-US" },
+  James: { langTag: "en-AU" },
   Kore: { langTag: "en-CA" },
   Arthur: { langTag: "en-GB" },
-  Fenrir: { langTag: "en-US" },
-  James: { langTag: "en-AU" },
 };
 
 async function generateStudioVoiceFallback(text: string, voice = "Priya"): Promise<{ audioBuffer: Buffer; mimeType: string; durationSeconds: number }> {
