@@ -11,10 +11,13 @@ import {
   Check, 
   FileAudio,
   Clock,
-  Share2
+  Share2,
+  RotateCcw,
+  RotateCw,
+  Upload
 } from 'lucide-react';
 import { VoiceName } from '../types';
-import { VOICE_OPTIONS, downloadAudioFile, formatTime } from '../utils/audioUtils';
+import { VOICE_OPTIONS, downloadAudioFile, formatTime, downloadServerAudioDirect } from '../utils/audioUtils';
 import { ShareAudioModal } from './ShareAudioModal';
 
 interface VoiceWorkshopProps {
@@ -134,6 +137,30 @@ export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
     setPlaybackSpeed(speed);
     if (audioRef.current) {
       audioRef.current.playbackRate = speed;
+    }
+  };
+
+  const handleSeek = (newTime: number) => {
+    setCurrentTime(newTime);
+    if (audioRef.current) {
+      audioRef.current.currentTime = newTime;
+    }
+  };
+
+  const handleSkip = (seconds: number) => {
+    if (audioRef.current) {
+      const newTime = Math.max(0, Math.min(audioRef.current.duration || durationSeconds, audioRef.current.currentTime + seconds));
+      audioRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
+    }
+  };
+
+  const handleDownload = () => {
+    const filename = `VoiceCraft_${activeVoice}_Speech_${Date.now()}`;
+    if (generatedAudioUrl && generatedAudioUrl.startsWith('data:')) {
+      downloadAudioFile(generatedAudioUrl, filename);
+    } else {
+      downloadServerAudioDirect(scriptText, activeVoice, filename);
     }
   };
 
@@ -281,8 +308,8 @@ export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
 
                   <button
                     id="workshop-download-mp3-btn"
-                    onClick={() => downloadAudioFile(generatedAudioUrl, `VoiceCraft_${activeVoice}_Speech`)}
-                    className="bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-teal-500/20 transition-all cursor-pointer active:scale-95"
+                    onClick={handleDownload}
+                    className="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-teal-500/20 transition-all cursor-pointer active:scale-95"
                   >
                     <Download className="w-3.5 h-3.5" />
                     <span>Download .MP3</span>
@@ -291,57 +318,69 @@ export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
               </div>
 
               {/* Player UI */}
-              <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800 flex items-center gap-4">
-                <button
-                  id="workshop-play-pause-btn"
-                  onClick={handleTogglePlay}
-                  className="w-12 h-12 rounded-2xl bg-teal-500 hover:bg-teal-400 text-slate-950 flex items-center justify-center shrink-0 transition-transform active:scale-95 cursor-pointer shadow-lg shadow-teal-500/20"
-                >
-                  {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
-                </button>
+              <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800 space-y-3">
+                <div className="flex items-center gap-3">
+                  <button
+                    id="workshop-play-pause-btn"
+                    onClick={handleTogglePlay}
+                    className="w-12 h-12 rounded-2xl bg-teal-500 hover:bg-teal-400 text-slate-950 flex items-center justify-center shrink-0 transition-transform active:scale-95 cursor-pointer shadow-lg shadow-teal-500/20"
+                  >
+                    {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
+                  </button>
 
-                <div className="flex-1 space-y-2">
-                  <div className="flex items-center justify-between text-xs text-slate-400">
-                    <span className="font-semibold text-slate-200">VoiceCraft Studio Output</span>
-                    <span>{formatTime(currentTime)} / {formatTime(durationSeconds)}</span>
-                  </div>
+                  <button
+                    onClick={() => handleSkip(-15)}
+                    className="p-2.5 bg-slate-900 hover:bg-slate-850 text-slate-300 rounded-xl border border-slate-800 transition-colors cursor-pointer"
+                    title="Skip Back 15s"
+                  >
+                    <RotateCcw className="w-4 h-4 text-teal-400" />
+                  </button>
 
-                  {/* Visualizer bars */}
-                  <div className="flex items-center gap-1 h-6">
-                    {[...Array(28)].map((_, i) => (
-                      <div
-                        key={i}
-                        className={`flex-1 rounded-full transition-all duration-150 ${
-                          isPlaying 
-                            ? 'bg-gradient-to-t from-teal-500 to-cyan-400' 
-                            : 'bg-slate-800'
-                        }`}
-                        style={{
-                          height: isPlaying ? `${Math.max(20, Math.sin((i + currentTime * 6)) * 100)}%` : '20%',
-                        }}
-                      />
-                    ))}
+                  <button
+                    onClick={() => handleSkip(15)}
+                    className="p-2.5 bg-slate-900 hover:bg-slate-850 text-slate-300 rounded-xl border border-slate-800 transition-colors cursor-pointer"
+                    title="Skip Forward 15s"
+                  >
+                    <RotateCw className="w-4 h-4 text-teal-400" />
+                  </button>
+
+                  <div className="flex-1 space-y-1.5">
+                    <div className="flex items-center justify-between text-xs text-slate-400">
+                      <span className="font-semibold text-slate-200">Voice: {activeVoice}</span>
+                      <span className="font-mono text-teal-300 font-semibold">{formatTime(currentTime)} / {formatTime(durationSeconds)}</span>
+                    </div>
+
+                    <input
+                      type="range"
+                      min="0"
+                      max={durationSeconds || 10}
+                      step="0.1"
+                      value={currentTime}
+                      onChange={(e) => handleSeek(Number(e.target.value))}
+                      className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-teal-400 hover:accent-teal-300"
+                      title="Seek Audio"
+                    />
                   </div>
                 </div>
-              </div>
 
-              {/* Speed Controls */}
-              <div className="flex items-center justify-between text-xs text-slate-400 pt-1">
-                <span>Playback Cadence:</span>
-                <div className="flex items-center gap-1.5">
-                  {[0.75, 1.0, 1.25, 1.5, 2.0].map((rate) => (
-                    <button
-                      key={rate}
-                      onClick={() => handleSpeedChange(rate)}
-                      className={`px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
-                        playbackSpeed === rate
-                          ? 'bg-teal-500 text-slate-950 font-bold'
-                          : 'bg-slate-800 text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {rate}x
-                    </button>
-                  ))}
+                {/* Speed Controls */}
+                <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800">
+                  <span>Playback Cadence:</span>
+                  <div className="flex items-center gap-1.5">
+                    {[0.75, 1.0, 1.25, 1.5, 2.0].map((rate) => (
+                      <button
+                        key={rate}
+                        onClick={() => handleSpeedChange(rate)}
+                        className={`px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+                          playbackSpeed === rate
+                            ? 'bg-teal-500 text-slate-950 font-bold'
+                            : 'bg-slate-800 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {rate}x
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>

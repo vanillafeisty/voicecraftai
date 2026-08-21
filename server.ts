@@ -89,7 +89,7 @@ async function startServer() {
     // 🇮🇳 INDIAN VOICES
     Ananya: {
       langTag: "en-IN",
-      geminiVoice: "Aoede",
+      geminiVoice: "Kore",
       tonePrompt: "Perform as an ultra-natural, emotionally expressive, warm Indian English human storyteller with delicate breath pauses, natural conversational rhythm, and lifelike warmth without any robotic monotony",
       sampleLine: "The old monsoon rains swept through the quiet courtyard, carrying the scent of wet jasmine and long-forgotten memories.",
       category: "Storytelling",
@@ -105,21 +105,21 @@ async function startServer() {
     },
     Deepa: {
       langTag: "en-IN",
-      geminiVoice: "Aoede",
+      geminiVoice: "Zephyr",
       tonePrompt: "Speak in a gentle, soothing, warm, and atmospheric Indian English bedtime audiobook voice",
       sampleLine: "Close your eyes and breathe gently as the evening settles peacefully over the silent valley.",
       category: "Storytelling",
     },
     Rohan: {
       langTag: "en-IN",
-      geminiVoice: "Zephyr",
+      geminiVoice: "Puck",
       tonePrompt: "Perform in a vibrant, animated, playful, and dynamic Indian English storytelling narrator voice",
       sampleLine: "With a sudden flash of brilliant light, the ancient clockwork gears began turning for the first time in three centuries!",
       category: "Storytelling",
     },
     Aarav: {
       langTag: "en-IN",
-      geminiVoice: "Puck",
+      geminiVoice: "Charon",
       tonePrompt: "Narrate in a deep, resonant, natural, and authoritative Indian English documentary narrative voice",
       sampleLine: "Our comprehensive economic investigation traces the evolution of digital finance across emerging markets.",
       category: "Narrative",
@@ -133,7 +133,7 @@ async function startServer() {
     },
     Priya: {
       langTag: "en-IN",
-      geminiVoice: "Aoede",
+      geminiVoice: "Zephyr",
       tonePrompt: "Speak in a clear, structured, articulate, and flowing Indian English corporate explainer tone",
       sampleLine: "The user interface architecture is structured around modular event streams and real-time state synchronizers.",
       category: "Descriptive",
@@ -171,14 +171,14 @@ async function startServer() {
     },
     Sarah: {
       langTag: "en-US",
-      geminiVoice: "Aoede",
+      geminiVoice: "Zephyr",
       tonePrompt: "Deliver as a bright, polished, engaging, flowing international broadcast news anchor",
       sampleLine: "Good evening. Tonight’s lead report focuses on major breakthroughs in generative artificial intelligence and neural computing.",
       category: "Narrative",
     },
     James: {
       langTag: "en-AU",
-      geminiVoice: "Zephyr",
+      geminiVoice: "Puck",
       tonePrompt: "Narrate in a smooth, classic, flowing Australian/International broadcaster baritone",
       sampleLine: "Welcome to this week’s international dispatch, examining ecological preservation across coastal coral reefs.",
       category: "Narrative",
@@ -200,42 +200,137 @@ async function startServer() {
   };
 
   /**
-   * High-fidelity zero-quota speech synthesis engine fallback.
-   * Generates authentic, crystal-clear spoken voice audio (MP3) with native accent support.
+   * Splits arbitrary length text (5,000+ words) into natural sentence/clause chunks under 130 characters.
+   */
+  function splitTextIntoChunks(rawText: string, maxChunkLength = 120): string[] {
+    const clean = rawText
+      .replace(/[""“”]/g, '')
+      .replace(/[\r\n]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!clean) return ['VoiceCraft AI audio generation ready.'];
+    if (clean.length <= maxChunkLength) return [clean];
+
+    // Split on sentence punctuation first (. ! ? ; : newline)
+    const sentenceParts = clean.split(/(?<=[.?!;:\n])\s+/);
+    const chunks: string[] = [];
+    let currentChunk = '';
+
+    for (const part of sentenceParts) {
+      if ((currentChunk + ' ' + part).trim().length <= maxChunkLength) {
+        currentChunk = (currentChunk + ' ' + part).trim();
+      } else {
+        if (currentChunk) {
+          chunks.push(currentChunk);
+          currentChunk = '';
+        }
+
+        if (part.length <= maxChunkLength) {
+          currentChunk = part;
+        } else {
+          // Subdivide long sentences by commas or word boundaries
+          const words = part.split(/\s+/);
+          let subChunk = '';
+          for (const w of words) {
+            if ((subChunk + ' ' + w).trim().length <= maxChunkLength) {
+              subChunk = (subChunk + ' ' + w).trim();
+            } else {
+              if (subChunk) chunks.push(subChunk);
+              subChunk = w;
+            }
+          }
+          if (subChunk) {
+            currentChunk = subChunk;
+          }
+        }
+      }
+    }
+
+    if (currentChunk) {
+      chunks.push(currentChunk);
+    }
+
+    return chunks.length > 0 ? chunks : [clean.slice(0, maxChunkLength)];
+  }
+
+  /**
+   * Helper to execute async tasks concurrently in batches with order preservation.
+   */
+  async function mapConcurrent<T, R>(
+    items: T[],
+    concurrency: number,
+    fn: (item: T, index: number) => Promise<R>
+  ): Promise<R[]> {
+    const results: R[] = new Array(items.length);
+    for (let i = 0; i < items.length; i += concurrency) {
+      const batch = items.slice(i, i + concurrency);
+      const batchResults = await Promise.all(
+        batch.map((item, idx) => fn(item, i + idx))
+      );
+      for (let j = 0; j < batchResults.length; j++) {
+        results[i + j] = batchResults[j];
+      }
+    }
+    return results;
+  }
+
+  /**
+   * High-fidelity zero-quota speech synthesis engine with concurrent multi-chunk batching.
+   * Handles arbitrary text length (5,000+ words) in seconds and returns continuous MP3 audio.
    */
   async function generateStudioVoiceFallback(text: string, voice = "Priya"): Promise<{ audioBuffer: Buffer; mimeType: string; durationSeconds: number }> {
     const config = VOICE_BACKEND_CONFIGS[voice] || VOICE_BACKEND_CONFIGS.Priya;
     const langTag = config.langTag;
+    const chunks = splitTextIntoChunks(text, 120);
 
-    const clean = text
-      .replace(/[""“”]/g, '')
-      .replace(/[\n\r]+/g, ' ')
-      .trim();
+    // Fetch individual audio chunk with retry
+    const fetchChunk = async (chunk: string, index: number): Promise<Buffer | null> => {
+      const encodedText = encodeURIComponent(chunk);
+      const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=${langTag}&client=tw-ob`;
 
-    const encodedText = encodeURIComponent(clean || "VoiceCraft AI audio generation ready.");
-    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=${langTag}&client=tw-ob`;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const response = await fetch(ttsUrl, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Referer": "https://translate.google.com/",
+              "Accept": "*/*",
+            },
+          });
 
-    const response = await fetch(ttsUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://translate.google.com/",
-        "Accept": "*/*",
-      },
-    });
+          if (response.ok) {
+            const arrayBuffer = await response.arrayBuffer();
+            return Buffer.from(arrayBuffer);
+          }
+          
+          if (attempt < 3) {
+            await new Promise(r => setTimeout(r, 120 * attempt));
+          }
+        } catch (err) {
+          if (attempt === 3) {
+            console.warn(`TTS fetch failed for chunk ${index} after 3 attempts:`, err);
+          }
+          await new Promise(r => setTimeout(r, 120 * attempt));
+        }
+      }
+      return null;
+    };
 
-    if (!response.ok) {
-      throw new Error(`Speech synthesis request failed with HTTP ${response.status}`);
+    // Process in concurrent batches of 10 requests for rapid completion of 5000+ words
+    const chunkBuffers = await mapConcurrent(chunks, 10, fetchChunk);
+    const validBuffers = chunkBuffers.filter((b): b is Buffer => b !== null && b.length > 0);
+
+    if (validBuffers.length === 0) {
+      throw new Error('Failed to generate studio audio stream');
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const audioBuffer = Buffer.from(arrayBuffer);
-
-    // Approximate duration: average 150 words per minute (~2.5 words per second)
-    const wordCount = (clean || "").split(/\s+/).filter(Boolean).length;
-    const durationSeconds = Math.max(1.2, Math.round((wordCount / 2.5) * 10) / 10);
+    const combinedBuffer = Buffer.concat(validBuffers);
+    const wordCount = text.split(/\s+/).filter(Boolean).length;
+    const durationSeconds = Math.max(1.2, Math.round((wordCount / 2.6) * 10) / 10);
 
     return {
-      audioBuffer,
+      audioBuffer: combinedBuffer,
       mimeType: "audio/mp3",
       durationSeconds,
     };
@@ -269,8 +364,10 @@ async function startServer() {
       const now = Date.now();
       const apiKey = process.env.GEMINI_API_KEY;
 
-      // Check if user specifically requested studio engine or if quota is cooling down or missing API key
-      if (engine === "studio" || !apiKey || now < geminiTtsCooldownUntil) {
+      const isLongText = text.length > 800 || text.split(/\s+/).length > 150;
+
+      // Check if user specifically requested studio engine, or text is long-form (5,000+ words), or quota is cooling down or missing API key
+      if (isLongText || engine === "studio" || !apiKey || now < geminiTtsCooldownUntil) {
         const studioResult = await generateStudioVoiceFallback(text, voiceName);
         const base64Mp3 = studioResult.audioBuffer.toString("base64");
         const wavDataUrl = `data:audio/mp3;base64,${base64Mp3}`;
@@ -282,7 +379,8 @@ async function startServer() {
           sampleRate: 24000,
           voice: voiceName,
           engine: "studio",
-          isStudioFallback: true,
+          isStudioFallback: !isLongText && engine !== "studio",
+          wordCount: text.split(/\s+/).filter(Boolean).length,
         });
       }
 
