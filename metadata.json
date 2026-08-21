@@ -1,0 +1,6 @@
+{
+  "name": "VoiceCraft AI",
+  "description": "Context-Aware Text-to-Audio Studio with natural voice synthesis, interactive conversational generation, and instant MP3 audio downloads.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
