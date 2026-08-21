@@ -15,9 +15,12 @@ import {
   Share2,
   Sparkles,
   Globe,
-  Mic2
+  Mic2,
+  CheckCircle2,
+  VolumeX,
+  Radio
 } from 'lucide-react';
-import { VoiceName, VoiceRegion, VoiceGender, ConversationMessage } from '../types';
+import { VoiceName, VoiceRegion, VoiceGender, VoiceOption, ConversationMessage } from '../types';
 import { VOICE_OPTIONS, downloadAudioFile, formatTime, downloadText } from '../utils/audioUtils';
 import { ShareAudioModal } from './ShareAudioModal';
 
@@ -33,7 +36,7 @@ const INITIAL_MESSAGES: ConversationMessage[] = [
   {
     id: 'msg-welcome',
     role: 'assistant',
-    text: 'Welcome to VoiceCraft AI! Type any text or script below, choose an Indian or International voice (Male or Female), and click Generate Audio to transcribe it into high-quality speech and download your MP3 file.',
+    text: 'Welcome to VoiceCraft AI! Type or paste any text below, choose an Indian or International voice (Stern, Flowing, Male, or Female), and it will automatically synthesize into lifelike speech ready to download as an MP3.',
     timestamp: 'Ready',
     voice: 'Priya',
   },
@@ -54,7 +57,11 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
   const [selectedRegion, setSelectedRegion] = useState<VoiceRegion>('Indian');
   const [selectedGender, setSelectedGender] = useState<VoiceGender | 'All'>('All');
 
-  // Audio Playback State
+  // Sample voice preview state
+  const [samplePlayingVoiceId, setSamplePlayingVoiceId] = useState<VoiceName | null>(null);
+  const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
+
+  // Audio Playback State for messages
   const [activePlayingId, setActivePlayingId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
@@ -74,6 +81,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
   });
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const sampleAudioRef = useRef<HTMLAudioElement | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   const hasAutoRunRef = useRef<boolean>(false);
 
@@ -106,7 +114,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
         isGenerating: true,
       };
       setMessages(prev => [...prev, newMsg]);
-      generateAudioForMessage(customId, initialText, selectedVoice, autoDownload);
+      generateAudioForMessage(customId, initialText, selectedVoice, autoDownload, true);
     }
   }, [autoGenerate, initialText, selectedVoice, autoDownload]);
 
@@ -120,6 +128,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
     setMessages(prev => prev.map(m => m.id === msgId ? { ...m, isGenerating: true, error: undefined } : m));
 
     try {
+      const voiceOption = VOICE_OPTIONS.find(v => v.id === voiceName);
       const res = await fetch('/api/tts/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -151,7 +160,8 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
 
         if (shouldAutoPlay && audioRef.current) {
           audioRef.current.src = data.wavDataUrl;
-          audioRef.current.playbackRate = playbackSpeed;
+          const targetRate = voiceOption ? voiceOption.rate * playbackSpeed : playbackSpeed;
+          audioRef.current.playbackRate = targetRate;
           audioRef.current.play().then(() => {
             setActivePlayingId(msgId);
           }).catch(err => console.error('Auto-play error:', err));
@@ -162,6 +172,102 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
     } catch (err: any) {
       console.error('Error synthesizing speech:', err);
       setMessages(prev => prev.map(m => m.id === msgId ? { ...m, isGenerating: false, error: err.message || 'Failed to synthesize' } : m));
+    }
+  };
+
+  /**
+   * Auto-generation when user selects or switches to a new voice:
+   * Plugs in and understands the text, then generates speech audio in the new voice immediately.
+   */
+  const handleSelectVoiceAndAutoGenerate = async (voice: VoiceOption) => {
+    onSelectVoice(voice.id);
+    
+    // Stop any playing sample audio
+    if (sampleAudioRef.current) {
+      sampleAudioRef.current.pause();
+      setSamplePlayingVoiceId(null);
+    }
+
+    const currentText = inputText.trim();
+    setVoiceNotice(`Plugged into ${voice.name} (${voice.tone}) - Synthesizing speech...`);
+    setTimeout(() => setVoiceNotice(null), 3000);
+
+    if (currentText) {
+      // If user has input text, create a message for it and autogenerate
+      const assistantMsgId = `asst-${Date.now()}`;
+      const asstMsg: ConversationMessage = {
+        id: assistantMsgId,
+        role: 'assistant',
+        text: currentText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        voice: voice.id,
+        isGenerating: true,
+      };
+
+      setMessages(prev => [...prev, asstMsg]);
+      await generateAudioForMessage(assistantMsgId, currentText, voice.id, false, true);
+    } else {
+      // If input is empty, re-synthesize the latest message or welcome message in the new voice
+      const lastMsg = [...messages].reverse().find(m => m.role === 'assistant');
+      if (lastMsg) {
+        const newMsgId = `asst-voice-switch-${Date.now()}`;
+        const newMsg: ConversationMessage = {
+          id: newMsgId,
+          role: 'assistant',
+          text: lastMsg.text,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          voice: voice.id,
+          isGenerating: true,
+        };
+        setMessages(prev => [...prev, newMsg]);
+        await generateAudioForMessage(newMsgId, lastMsg.text, voice.id, false, true);
+      }
+    }
+  };
+
+  /**
+   * Sample voice preview: plays the official sample line of that voice
+   */
+  const handlePlayVoiceSample = async (voice: VoiceOption, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    // If already playing this sample, pause it
+    if (samplePlayingVoiceId === voice.id && sampleAudioRef.current) {
+      if (!sampleAudioRef.current.paused) {
+        sampleAudioRef.current.pause();
+        setSamplePlayingVoiceId(null);
+        return;
+      }
+    }
+
+    // Stop main audio player if active
+    if (audioRef.current && !audioRef.current.paused) {
+      audioRef.current.pause();
+      setActivePlayingId(null);
+    }
+
+    setSamplePlayingVoiceId(voice.id);
+
+    try {
+      const res = await fetch('/api/tts/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: voice.sampleLine,
+          voice: voice.id,
+          engine: 'studio',
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success && data.wavDataUrl && sampleAudioRef.current) {
+        sampleAudioRef.current.src = data.wavDataUrl;
+        sampleAudioRef.current.playbackRate = voice.rate;
+        sampleAudioRef.current.play().catch(() => {});
+      }
+    } catch (err) {
+      console.error('Error playing sample audio:', err);
+      setSamplePlayingVoiceId(null);
     }
   };
 
@@ -203,6 +309,12 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
       return;
     }
 
+    // Stop sample audio if playing
+    if (sampleAudioRef.current && !sampleAudioRef.current.paused) {
+      sampleAudioRef.current.pause();
+      setSamplePlayingVoiceId(null);
+    }
+
     if (activePlayingId === msg.id && audioRef.current) {
       if (!audioRef.current.paused) {
         audioRef.current.pause();
@@ -215,8 +327,10 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
     }
 
     if (audioRef.current) {
+      const voiceOption = VOICE_OPTIONS.find(v => v.id === (msg.voice || selectedVoice));
       audioRef.current.src = msg.audioUrl;
-      audioRef.current.playbackRate = playbackSpeed;
+      const targetRate = voiceOption ? voiceOption.rate * playbackSpeed : playbackSpeed;
+      audioRef.current.playbackRate = targetRate;
       audioRef.current.play().then(() => {
         setActivePlayingId(msg.id);
       }).catch(err => console.error('Audio play error:', err));
@@ -226,7 +340,9 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
   const handleSpeedChange = (speed: number) => {
     setPlaybackSpeed(speed);
     if (audioRef.current) {
-      audioRef.current.playbackRate = speed;
+      const activeMsg = messages.find(m => m.id === activePlayingId);
+      const voiceOption = VOICE_OPTIONS.find(v => v.id === (activeMsg?.voice || selectedVoice));
+      audioRef.current.playbackRate = voiceOption ? voiceOption.rate * speed : speed;
     }
   };
 
@@ -240,7 +356,11 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
     if (audioRef.current) {
       audioRef.current.pause();
     }
+    if (sampleAudioRef.current) {
+      sampleAudioRef.current.pause();
+    }
     setActivePlayingId(null);
+    setSamplePlayingVoiceId(null);
     setMessages(INITIAL_MESSAGES);
   };
 
@@ -251,6 +371,23 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
     downloadText(transcriptText, `VoiceCraft_Transcript_${Date.now()}.txt`, 'text/plain');
   };
 
+  const getToneBadgeStyle = (tone: string) => {
+    switch (tone) {
+      case 'Stern & Firm':
+        return 'bg-amber-950/60 text-amber-300 border-amber-800/60';
+      case 'Flowing & Warm':
+        return 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60';
+      case 'Authoritative':
+        return 'bg-purple-950/60 text-purple-300 border-purple-800/60';
+      case 'Corporate Direct':
+        return 'bg-blue-950/60 text-blue-300 border-blue-800/60';
+      case 'Smooth Broadcast':
+        return 'bg-cyan-950/60 text-cyan-300 border-cyan-800/60';
+      default:
+        return 'bg-teal-950/60 text-teal-300 border-teal-800/60';
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-10">
       {/* Hidden Audio Player for Speech Playback */}
@@ -259,6 +396,12 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 4)}
         onEnded={() => setActivePlayingId(null)}
+      />
+
+      {/* Hidden Audio Player for Voice Sample Previews */}
+      <audio
+        ref={sampleAudioRef}
+        onEnded={() => setSamplePlayingVoiceId(null)}
       />
 
       {/* Top Header Card */}
@@ -272,7 +415,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
               Speech Synthesis & MP3 Studio
             </h1>
             <p className="text-xs text-slate-400">
-              Transcribe text to lifelike spoken audio with Indian & International voice profiles
+              Professional stern & flowing voice profiles with instant sample previews and autogeneration
             </p>
           </div>
         </div>
@@ -300,8 +443,16 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
         </div>
       </div>
 
+      {/* Voice Notice Toast */}
+      {voiceNotice && (
+        <div className="bg-gradient-to-r from-teal-900/60 to-cyan-900/60 border border-teal-500/40 rounded-2xl p-3 px-4 flex items-center gap-2.5 text-xs text-teal-200 shadow-lg animate-in fade-in slide-in-from-top-2 duration-200">
+          <Sparkles className="w-4 h-4 text-teal-400 shrink-0" />
+          <span className="font-semibold">{voiceNotice}</span>
+        </div>
+      )}
+
       {/* Voice Selection & Filter Strip */}
-      <div className="bg-slate-900/90 rounded-3xl border border-slate-800 p-4 sm:p-5 shadow-lg space-y-4">
+      <div className="bg-slate-900/95 rounded-3xl border border-slate-800 p-4 sm:p-5 shadow-lg space-y-4">
         {/* Category Filters: Region & Gender */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
           {/* Region Tabs (Indian vs International) */}
@@ -310,7 +461,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
               id="filter-region-indian"
               onClick={() => {
                 setSelectedRegion('Indian');
-                if (!['Priya', 'Deepa', 'Aarav', 'Rohan'].includes(selectedVoice)) {
+                if (!['Priya', 'Kavita', 'Deepa', 'Aarav', 'Vikram', 'Rohan'].includes(selectedVoice)) {
                   onSelectVoice('Priya');
                 }
               }}
@@ -320,14 +471,14 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <span>🇮🇳 Indian Voices</span>
+              <span>🇮🇳 Indian Voices (6)</span>
             </button>
             <button
               id="filter-region-intl"
               onClick={() => {
                 setSelectedRegion('International');
-                if (!['Kore', 'Sarah', 'Fenrir', 'James'].includes(selectedVoice)) {
-                  onSelectVoice('Kore');
+                if (!['Sarah', 'Eleanor', 'Kore', 'Arthur', 'Fenrir', 'James'].includes(selectedVoice)) {
+                  onSelectVoice('Sarah');
                 }
               }}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
@@ -337,7 +488,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
               }`}
             >
               <Globe className="w-3.5 h-3.5" />
-              <span>🌐 International</span>
+              <span>🌐 International (6)</span>
             </button>
           </div>
 
@@ -360,37 +511,96 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
           </div>
         </div>
 
-        {/* Voice Option Chips Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        {/* Voice Cards Grid with Sample Previews */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {filteredVoices.map((v) => {
             const isSelected = selectedVoice === v.id;
+            const isPlayingSample = samplePlayingVoiceId === v.id;
+
             return (
-              <button
+              <div
                 key={v.id}
                 id={`voice-card-${v.id}`}
-                onClick={() => onSelectVoice(v.id)}
-                className={`p-3 rounded-2xl text-left border transition-all cursor-pointer flex flex-col justify-between group ${
+                onClick={() => handleSelectVoiceAndAutoGenerate(v)}
+                className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-2.5 group relative ${
                   isSelected
-                    ? 'bg-teal-500/15 border-teal-500 text-teal-200 shadow-lg shadow-teal-500/10'
-                    : 'bg-slate-950/60 hover:bg-slate-800/80 border-slate-800 text-slate-300'
+                    ? 'bg-teal-950/25 border-teal-500 text-teal-100 shadow-lg shadow-teal-500/10 ring-1 ring-teal-500/50'
+                    : 'bg-slate-950/70 hover:bg-slate-850 border-slate-800 text-slate-300 hover:border-slate-700'
                 }`}
               >
-                <div className="flex items-center justify-between w-full mb-1">
-                  <span className="font-bold text-sm text-white group-hover:text-teal-300">
-                    {v.name}
-                  </span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                    v.gender === 'Female' 
-                      ? 'bg-pink-950/60 text-pink-300 border border-pink-800/50' 
-                      : 'bg-blue-950/60 text-blue-300 border border-blue-800/50'
-                  }`}>
-                    {v.gender}
+                {/* Top Row: Name, Gender, Tone Badge */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-base text-white group-hover:text-teal-300">
+                      {v.name}
+                    </span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
+                      v.gender === 'Female' 
+                        ? 'bg-pink-950/60 text-pink-300 border-pink-800/50' 
+                        : 'bg-blue-950/60 text-blue-300 border-blue-800/50'
+                    }`}>
+                      {v.gender}
+                    </span>
+                  </div>
+
+                  {/* Tone Badge */}
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${getToneBadgeStyle(v.tone)}`}>
+                    {v.tone}
                   </span>
                 </div>
-                <div className="text-[11px] text-slate-400 line-clamp-1">
-                  {v.styleTag}
+
+                {/* Accent & Description */}
+                <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                  {v.description}
+                </p>
+
+                {/* Sample Line Box */}
+                <div className="bg-slate-900/90 rounded-xl p-2.5 border border-slate-800/80 text-[11px] text-slate-300 italic font-mono flex items-start gap-2">
+                  <span className="text-teal-400 font-bold shrink-0">“</span>
+                  <span className="line-clamp-2 flex-1">{v.sampleLine}</span>
+                  <span className="text-teal-400 font-bold shrink-0">”</span>
                 </div>
-              </button>
+
+                {/* Bottom Row: Sample Voice Play Button & Plug-In Indicator */}
+                <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60 text-xs">
+                  {/* Sample Voice Button */}
+                  <button
+                    onClick={(e) => handlePlayVoiceSample(v, e)}
+                    className={`py-1.5 px-3 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      isPlayingSample
+                        ? 'bg-teal-500 text-slate-950 font-bold shadow-md animate-pulse'
+                        : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-teal-300 border border-slate-800'
+                    }`}
+                    title="Listen to sample audio of this voice"
+                  >
+                    {isPlayingSample ? (
+                      <>
+                        <Pause className="w-3.5 h-3.5" />
+                        <span>Playing Sample...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Volume2 className="w-3.5 h-3.5 text-teal-400" />
+                        <span>Sample Voice</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Select Status */}
+                  <div className="flex items-center gap-1 text-[11px] font-semibold">
+                    {isSelected ? (
+                      <span className="text-teal-300 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" />
+                        <span>Plugged In</span>
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 group-hover:text-slate-300">
+                        Click to Use
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
             );
           })}
         </div>
@@ -476,9 +686,9 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                             {msg.isGenerating ? (
                               <span className="text-teal-400 animate-pulse">Transcribing & synthesizing audio...</span>
                             ) : isPlayingThis ? (
-                              <span className="text-teal-300 font-bold">Now Playing</span>
+                              <span className="text-teal-300 font-bold">Now Playing ({msg.voice || selectedVoice})</span>
                             ) : (
-                              <span className="text-teal-400 hover:underline">Voice Audio Ready</span>
+                              <span className="text-teal-400 hover:underline">Voice Audio Ready ({msg.voice || selectedVoice})</span>
                             )}
                           </span>
                           <span className="font-mono text-[11px]">
@@ -494,7 +704,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                               className={`flex-1 rounded-full transition-all duration-150 ${
                                 isPlayingThis
                                   ? 'bg-gradient-to-t from-teal-500 to-cyan-400'
-                                  : 'bg-slate-800 hover:bg-slate-700'
+                                  : 'bg-slate-800 hover:bg-slate-750'
                               }`}
                               style={{
                                 height: isPlayingThis
@@ -605,7 +815,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                 handleSendMessage();
               }
             }}
-            placeholder={`Enter or paste your text here to transcribe & generate speech in ${selectedVoice}'s voice (press Enter or click Generate)...`}
+            placeholder={`Enter or paste your text here to transcribe & generate speech in ${selectedVoice}'s voice (press Enter, click Generate Audio, or select any voice above)...`}
             className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 pr-36 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-teal-500/50 text-sm leading-relaxed font-sans resize-none"
           />
 
@@ -623,7 +833,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
 
         <div className="flex items-center justify-between text-xs text-slate-500 px-2">
           <span>Active Voice: <strong className="text-teal-300">{selectedVoice}</strong> ({selectedRegion})</span>
-          <span>Press <strong className="text-slate-300">Enter</strong> to synthesize speech</span>
+          <span>Tip: Selecting any voice above will plug in and autogenerate speech</span>
         </div>
       </div>
 

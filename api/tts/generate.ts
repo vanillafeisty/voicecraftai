@@ -13,9 +13,24 @@ interface ApiResponse {
   send: (body: any) => ApiResponse | void;
 }
 
+const VOICE_BACKEND_CONFIGS: Record<string, { langTag: string }> = {
+  Priya: { langTag: "en-IN" },
+  Kavita: { langTag: "en-IN" },
+  Deepa: { langTag: "en-IN" },
+  Aarav: { langTag: "en-IN" },
+  Vikram: { langTag: "en-IN" },
+  Rohan: { langTag: "en-IN" },
+  Sarah: { langTag: "en-US" },
+  Eleanor: { langTag: "en-GB" },
+  Kore: { langTag: "en-CA" },
+  Arthur: { langTag: "en-GB" },
+  Fenrir: { langTag: "en-US" },
+  James: { langTag: "en-AU" },
+};
+
 async function generateStudioVoiceFallback(text: string, voice = "Priya"): Promise<{ audioBuffer: Buffer; mimeType: string; durationSeconds: number }> {
-  const isIndianVoice = ["Priya", "Aarav", "Deepa", "Rohan"].includes(voice) || !voice;
-  const langTag = isIndianVoice ? "en-IN" : "en";
+  const config = VOICE_BACKEND_CONFIGS[voice] || VOICE_BACKEND_CONFIGS.Priya;
+  const langTag = config.langTag;
 
   const clean = text
     .replace(/[""“”]/g, '')

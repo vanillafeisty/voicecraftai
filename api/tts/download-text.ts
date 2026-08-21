@@ -12,6 +12,21 @@ interface ApiResponse {
   send: (body: any) => ApiResponse | void;
 }
 
+const VOICE_LANG_MAP: Record<string, string> = {
+  Priya: 'en-IN',
+  Kavita: 'en-IN',
+  Deepa: 'en-IN',
+  Aarav: 'en-IN',
+  Vikram: 'en-IN',
+  Rohan: 'en-IN',
+  Sarah: 'en-US',
+  Eleanor: 'en-GB',
+  Kore: 'en-CA',
+  Arthur: 'en-GB',
+  Fenrir: 'en-US',
+  James: 'en-AU',
+};
+
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   try {
     const textQuery = req.query?.text;
@@ -20,8 +35,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     const text = (Array.isArray(textQuery) ? textQuery[0] : textQuery) || 'VoiceCraft AI Speech Audio';
     const voice = (Array.isArray(voiceQuery) ? voiceQuery[0] : voiceQuery) || 'Priya';
 
-    const isIndianVoice = ['Priya', 'Aarav', 'Deepa', 'Rohan'].includes(voice);
-    const langTag = isIndianVoice ? 'en-IN' : 'en';
+    const langTag = VOICE_LANG_MAP[voice] || 'en-IN';
 
     const clean = text
       .replace(/[""“”]/g, '')

@@ -78,13 +78,93 @@ async function startServer() {
   // Cooldown tracker for Gemini TTS quota
   let geminiTtsCooldownUntil = 0;
 
+  const VOICE_BACKEND_CONFIGS: Record<string, {
+    langTag: string;
+    geminiVoice: string;
+    tonePrompt: string;
+    sampleLine: string;
+  }> = {
+    Priya: {
+      langTag: "en-IN",
+      geminiVoice: "Aoede",
+      tonePrompt: "warm, flowing, articulate Indian English voice",
+      sampleLine: "Good morning. Here is the operational summary for our upcoming quarterly milestones.",
+    },
+    Kavita: {
+      langTag: "en-IN",
+      geminiVoice: "Kore",
+      tonePrompt: "stern, commanding, crisp, authoritative, professional Indian English corporate executive",
+      sampleLine: "Compliance protocols must be followed strictly across all enterprise deployments without exception.",
+    },
+    Deepa: {
+      langTag: "en-IN",
+      geminiVoice: "Aoede",
+      tonePrompt: "gentle, soothing, articulate Indian English instructional voice",
+      sampleLine: "Please review the following documentation carefully to ensure a seamless onboarding experience.",
+    },
+    Aarav: {
+      langTag: "en-IN",
+      geminiVoice: "Puck",
+      tonePrompt: "confident, resonant, articulate Indian English professional narrator",
+      sampleLine: "Our financial forecasts indicate strong, sustainable growth across all digital infrastructure sectors.",
+    },
+    Vikram: {
+      langTag: "en-IN",
+      geminiVoice: "Charon",
+      tonePrompt: "stern, commanding, disciplined, authoritative Indian English executive director",
+      sampleLine: "Immediate attention to detail and strict deadline execution are non-negotiable standards.",
+    },
+    Rohan: {
+      langTag: "en-IN",
+      geminiVoice: "Puck",
+      tonePrompt: "modern, upbeat, dynamic Indian English presenter",
+      sampleLine: "Let us explore the core architecture powering our real-time speech synthesis engine.",
+    },
+    Sarah: {
+      langTag: "en-US",
+      geminiVoice: "Aoede",
+      tonePrompt: "flowing, polished, natural conversational International broadcast voice",
+      sampleLine: "Welcome to today’s global intelligence briefing covering artificial intelligence breakthroughs.",
+    },
+    Eleanor: {
+      langTag: "en-GB",
+      geminiVoice: "Kore",
+      tonePrompt: "stern, crisp, authoritative British / International corporate director",
+      sampleLine: "All regulatory directives take effect immediately and require comprehensive departmental verification.",
+    },
+    Kore: {
+      langTag: "en-CA",
+      geminiVoice: "Kore",
+      tonePrompt: "neutral, crisp, articulate International studio voice",
+      sampleLine: "System diagnostic complete. All parameters are functioning within optimal thresholds.",
+    },
+    Arthur: {
+      langTag: "en-GB",
+      geminiVoice: "Charon",
+      tonePrompt: "stern, firm, commanding, authoritative British / International corporate executive",
+      sampleLine: "Strict adherence to security governance is required across all operational divisions.",
+    },
+    Fenrir: {
+      langTag: "en-US",
+      geminiVoice: "Fenrir",
+      tonePrompt: "deep, commanding, resonant baritone International voice",
+      sampleLine: "Standing by for mission-critical briefing and strategic deployment parameters.",
+    },
+    James: {
+      langTag: "en-AU",
+      geminiVoice: "Charon",
+      tonePrompt: "smooth, classic, flowing International broadcast news anchor",
+      sampleLine: "Reporting live from the economic forum with today’s key market and technology highlights.",
+    },
+  };
+
   /**
    * High-fidelity zero-quota speech synthesis engine.
    * Generates authentic, crystal-clear spoken voice audio (MP3) with native accent support.
    */
   async function generateStudioVoiceFallback(text: string, voice = "Priya"): Promise<{ audioBuffer: Buffer; mimeType: string; durationSeconds: number }> {
-    const isIndianVoice = ["Priya", "Aarav", "Deepa", "Rohan"].includes(voice) || !voice;
-    const langTag = isIndianVoice ? "en-IN" : "en";
+    const config = VOICE_BACKEND_CONFIGS[voice] || VOICE_BACKEND_CONFIGS.Priya;
+    const langTag = config.langTag;
 
     const clean = text
       .replace(/[""“”]/g, '')
@@ -123,14 +203,13 @@ async function startServer() {
   // Voice list endpoint
   app.get("/api/tts/voices", (_req, res) => {
     res.json({
-      voices: [
-        { id: "Priya", name: "Priya", gender: "Female", accent: "Indian English", style: "Warm & Articulate" },
-        { id: "Aarav", name: "Aarav", gender: "Male", accent: "Indian English", style: "Confident & Resonant" },
-        { id: "Deepa", name: "Deepa", gender: "Female", accent: "Indian English", style: "Gentle & Calm" },
-        { id: "Rohan", name: "Rohan", gender: "Male", accent: "Indian English", style: "Upbeat & Dynamic" },
-        { id: "Kore", name: "Kore", gender: "Female", accent: "International", style: "Neutral Studio" },
-        { id: "Fenrir", name: "Fenrir", gender: "Male", accent: "International", style: "Deep & Authoritative" },
-      ],
+      voices: Object.entries(VOICE_BACKEND_CONFIGS).map(([id, cfg]) => ({
+        id,
+        name: id,
+        langTag: cfg.langTag,
+        tone: cfg.tonePrompt,
+        sampleLine: cfg.sampleLine,
+      })),
     });
   });
 
@@ -143,6 +222,7 @@ async function startServer() {
       }
 
       const voiceName = voice || "Priya";
+      const voiceConfig = VOICE_BACKEND_CONFIGS[voiceName] || VOICE_BACKEND_CONFIGS.Priya;
       const now = Date.now();
       const apiKey = process.env.GEMINI_API_KEY;
 
@@ -173,7 +253,7 @@ async function startServer() {
               role: "user",
               parts: [
                 {
-                  text: `Please read and speak the following text clearly with natural inflection and clear pronunciation:\n\n${text}`,
+                  text: `Please speak the following text in a ${voiceConfig.tonePrompt} with clean pronunciation:\n\n${text}`,
                 },
               ],
             },
@@ -183,7 +263,7 @@ async function startServer() {
             speechConfig: {
               voiceConfig: {
                 prebuiltVoiceConfig: {
-                  voiceName: voiceName === "Priya" || voiceName === "Deepa" ? "Puck" : "Charon",
+                  voiceName: voiceConfig.geminiVoice || "Aoede",
                 },
               },
             },

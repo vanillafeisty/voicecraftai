@@ -1,6 +1,21 @@
 export type VoiceRegion = 'Indian' | 'International';
 export type VoiceGender = 'Female' | 'Male';
-export type VoiceName = 'Priya' | 'Aarav' | 'Deepa' | 'Rohan' | 'Kore' | 'Fenrir' | 'Sarah' | 'James';
+export type VoiceTone = 'Stern & Firm' | 'Flowing & Warm' | 'Authoritative' | 'Corporate Direct' | 'Smooth Broadcast' | 'Articulate & Gentle';
+
+export type VoiceName = 
+  | 'Priya' 
+  | 'Kavita' 
+  | 'Deepa' 
+  | 'Aarav' 
+  | 'Vikram' 
+  | 'Rohan' 
+  | 'Sarah' 
+  | 'Eleanor' 
+  | 'Kore' 
+  | 'Arthur' 
+  | 'Fenrir' 
+  | 'James';
+
 export type AudioEngine = 'gemini' | 'studio' | 'browser';
 
 export interface VoiceOption {
@@ -11,6 +26,10 @@ export interface VoiceOption {
   accent: string;
   description: string;
   styleTag: string;
+  tone: VoiceTone;
+  sampleLine: string;
+  pitch: number; // playback pitch modifier
+  rate: number;  // playback rate modifier
 }
 
 export type ContextPresetId = 
