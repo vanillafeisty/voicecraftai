@@ -12,6 +12,7 @@ import { VoiceName, AudioEngine } from '../types';
 import { VOICE_OPTIONS } from '../utils/audioUtils';
 import { DeployModal } from './DeployModal';
 import { ShareAudioModal } from './ShareAudioModal';
+import { BrandLogo } from './BrandLogo';
 
 export type AppNavTab = 'overview' | 'conversation' | 'workshop';
 
@@ -45,8 +46,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={() => setActiveTab('overview')}
               className="flex items-center gap-3 cursor-pointer select-none group shrink-0"
             >
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-teal-500 via-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-teal-500/20 text-white font-bold group-hover:scale-105 transition-transform">
-                <Sparkles className="w-5 h-5" />
+              <div className="w-10 h-10 flex items-center justify-center group-hover:scale-105 transition-transform drop-shadow-md">
+                <BrandLogo className="w-10 h-10" />
               </div>
               <div>
                 <div className="flex items-center gap-2">

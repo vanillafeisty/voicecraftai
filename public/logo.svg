@@ -1,0 +1,15 @@
+<svg viewBox="0 0 200 200" width="200" height="200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="hex-clip">
+      <polygon points="100,10 180,56 180,148 100,194 20,148 20,56" />
+    </clipPath>
+  </defs>
+  <polygon points="100,10 180,56 180,148 100,194 20,148 20,56" fill="#2B323B" />
+  <g clip-path="url(#hex-clip)" stroke="#FFFFFF" stroke-width="4" stroke-linecap="square">
+    <line x1="90" y1="0" x2="35" y2="180" />
+    <line x1="105" y1="0" x2="160" y2="190" />
+    <line x1="145" y1="20" x2="65" y2="185" />
+    <line x1="10" y1="75" x2="195" y2="190" />
+    <line x1="185" y1="125" x2="135" y2="195" />
+  </g>
+</svg>
