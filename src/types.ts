@@ -1,10 +1,13 @@
-export type VoiceName = 'Priya' | 'Aarav' | 'Deepa' | 'Rohan' | 'Kore' | 'Fenrir';
+export type VoiceRegion = 'Indian' | 'International';
+export type VoiceGender = 'Female' | 'Male';
+export type VoiceName = 'Priya' | 'Aarav' | 'Deepa' | 'Rohan' | 'Kore' | 'Fenrir' | 'Sarah' | 'James';
 export type AudioEngine = 'gemini' | 'studio' | 'browser';
 
 export interface VoiceOption {
   id: VoiceName;
   name: string;
-  gender: 'Female' | 'Male';
+  gender: VoiceGender;
+  region: VoiceRegion;
   accent: string;
   description: string;
   styleTag: string;

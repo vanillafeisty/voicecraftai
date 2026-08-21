@@ -406,6 +406,7 @@ export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
         text={scriptText}
         voice={activeVoice}
         tab="workshop"
+        audioUrl={generatedAudioUrl || undefined}
       />
     </div>
   );

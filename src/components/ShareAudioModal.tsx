@@ -6,14 +6,16 @@ import {
   Check, 
   Download, 
   ExternalLink, 
-  Sparkles, 
   Code, 
   Globe, 
-  Radio, 
   Send,
-  MessageCircle
+  MessageCircle,
+  Volume2,
+  Play,
+  Pause
 } from 'lucide-react';
 import { VoiceName, ContextPresetId } from '../types';
+import { downloadAudioFile } from '../utils/audioUtils';
 
 interface ShareAudioModalProps {
   isOpen: boolean;
@@ -22,6 +24,7 @@ interface ShareAudioModalProps {
   voice: VoiceName;
   preset?: ContextPresetId;
   tab?: 'overview' | 'conversation' | 'workshop';
+  audioUrl?: string;
 }
 
 export const ShareAudioModal: React.FC<ShareAudioModalProps> = ({
@@ -30,38 +33,39 @@ export const ShareAudioModal: React.FC<ShareAudioModalProps> = ({
   text,
   voice,
   preset = 'conversational',
-  tab = 'overview',
+  tab = 'conversation',
+  audioUrl,
 }) => {
   const [activeTab, setActiveTab] = useState<'app' | 'direct' | 'embed'>('app');
-  const [autoGenerate, setAutoGenerate] = useState<boolean>(true);
-  const [autoDownload, setAutoDownload] = useState<boolean>(false);
   const [copiedType, setCopiedType] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState<boolean>(false);
+  const [isPlayingPreview, setIsPlayingPreview] = useState<boolean>(false);
 
   if (!isOpen) return null;
 
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-  const encodedText = encodeURIComponent(text.trim() || 'Welcome to VoiceCraft AI');
+  const cleanText = text.trim() || 'VoiceCraft AI Speech';
+  const encodedText = encodeURIComponent(cleanText);
   
-  // 1. Interactive App Link
+  // 1. Interactive App Link with parameters to auto-generate & load text
   const appParams = new URLSearchParams();
-  appParams.set('text', text.trim() || 'Welcome to VoiceCraft AI');
+  appParams.set('text', cleanText);
   appParams.set('voice', voice);
   if (preset) appParams.set('preset', preset);
   if (tab) appParams.set('tab', tab);
-  if (autoGenerate) appParams.set('autogenerate', 'true');
-  if (autoDownload) appParams.set('autodownload', 'true');
+  appParams.set('autogenerate', 'true');
   
   const shareableAppLink = `${currentOrigin}/?${appParams.toString()}`;
 
   // 2. Direct MP3 Download URL
-  const filename = `VoiceCraft_${voice}_${(text.slice(0, 16) || 'audio').replace(/[^a-zA-Z0-9]/g, '_')}`;
-  const directDownloadUrl = `${currentOrigin}/api/tts/download-text?text=${encodedText}&voice=${encodeURIComponent(voice)}&filename=${encodeURIComponent(filename)}`;
+  const safeFilename = `VoiceCraft_${voice}_${cleanText.slice(0, 18).replace(/[^a-zA-Z0-9]/g, '_')}`;
+  const directDownloadUrl = `${currentOrigin}/api/tts/download-text?text=${encodedText}&voice=${encodeURIComponent(voice)}&filename=${encodeURIComponent(safeFilename)}`;
 
   // 3. Embed snippet
   const embedSnippet = `<iframe 
   src="${shareableAppLink}" 
   width="100%" 
-  height="450" 
+  height="420" 
   frameborder="0" 
   allow="autoplay" 
   style="border-radius: 16px; border: 1px solid #1e293b;"
@@ -73,15 +77,47 @@ export const ShareAudioModal: React.FC<ShareAudioModalProps> = ({
     setTimeout(() => setCopiedType(null), 2500);
   };
 
-  const shareText = `Listen to this speech generated with VoiceCraft AI (${voice} voice):`;
-  const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(`${shareText} ${shareableAppLink}`)}`;
-  const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareableAppLink)}`;
-  const telegramUrl = `https://t.me/share/url?url=${encodeURIComponent(shareableAppLink)}&text=${encodeURIComponent(shareText)}`;
+  // Direct instant browser download of the synthesized MP3 audio
+  const handleDownloadMp3 = async () => {
+    setIsDownloading(true);
+    try {
+      if (audioUrl && audioUrl.startsWith('data:audio')) {
+        downloadAudioFile(audioUrl, safeFilename);
+      } else {
+        // Fetch generated speech audio directly from API
+        const response = await fetch('/api/tts/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: cleanText, voice, engine: 'studio' }),
+        });
+        const data = await response.json();
+        if (data.success && data.wavDataUrl) {
+          downloadAudioFile(data.wavDataUrl, safeFilename);
+        } else {
+          // Fallback to window download trigger
+          window.open(directDownloadUrl, '_blank');
+        }
+      }
+    } catch (err) {
+      console.error('Download error:', err);
+      window.open(directDownloadUrl, '_blank');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const shareTitle = `Speech Audio: "${cleanText.slice(0, 60)}${cleanText.length > 60 ? '...' : ''}" (${voice} Voice)`;
+  const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(`${shareTitle}\n${shareableAppLink}`)}`;
+  const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareTitle)}&url=${encodeURIComponent(shareableAppLink)}`;
+  const telegramUrl = `https://t.me/share/url?url=${encodeURIComponent(shareableAppLink)}&text=${encodeURIComponent(shareTitle)}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200"
+      onClick={onClose}
+    >
       <div 
-        className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto"
+        className="relative w-full max-w-xl bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto custom-scrollbar"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -91,63 +127,78 @@ export const ShareAudioModal: React.FC<ShareAudioModalProps> = ({
               <Share2 className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white tracking-tight">Share & Export Audio Link</h2>
-              <p className="text-xs text-slate-400">Share your custom speech with anyone anywhere</p>
+              <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">Share & Export Audio</h2>
+              <p className="text-xs text-slate-400">Share or download your synthesized speech</p>
             </div>
           </div>
           <button
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+            aria-label="Close modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Snippet Preview Box */}
-        <div className="bg-slate-950/80 rounded-2xl p-4 border border-slate-800/80 space-y-2">
+        {/* Audio Summary & Direct Download Action */}
+        <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800/80 space-y-3">
           <div className="flex items-center justify-between text-xs text-slate-400">
-            <span className="font-semibold uppercase tracking-wider text-[11px] text-teal-400">Target Voice & Text</span>
-            <span className="bg-slate-800 px-2 py-0.5 rounded text-slate-300 font-medium">{voice} Voice</span>
+            <span className="font-semibold uppercase tracking-wider text-[11px] text-teal-400">Audio Preview & Text</span>
+            <span className="bg-slate-800 px-2.5 py-0.5 rounded-full text-slate-200 font-semibold border border-slate-700">
+              {voice} Voice
+            </span>
           </div>
-          <p className="text-xs text-slate-200 line-clamp-2 italic font-mono bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/50">
-            "{text || 'Welcome to VoiceCraft AI'}"
+
+          <p className="text-xs text-slate-200 italic font-mono bg-slate-900/80 p-3 rounded-xl border border-slate-800/60 line-clamp-3 leading-relaxed">
+            "{cleanText}"
           </p>
+
+          {/* Quick Direct Download Button */}
+          <button
+            id="modal-direct-download-btn"
+            onClick={handleDownloadMp3}
+            disabled={isDownloading}
+            className="w-full bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 text-slate-950 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-teal-500/20 transition-all cursor-pointer active:scale-98"
+          >
+            <Download className="w-4 h-4" />
+            <span>{isDownloading ? 'Preparing MP3 Download...' : 'Download MP3 File Now'}</span>
+          </button>
         </div>
 
         {/* Tab Selection */}
-        <div className="flex items-center gap-2 p-1 bg-slate-950 rounded-2xl border border-slate-800">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-950 rounded-2xl border border-slate-800">
           <button
             onClick={() => setActiveTab('app')}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'app'
                 ? 'bg-teal-500 text-slate-950 shadow-md'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
             <Globe className="w-3.5 h-3.5" />
-            <span>Interactive App Link</span>
+            <span>Interactive Web Link</span>
           </button>
           <button
             onClick={() => setActiveTab('direct')}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'direct'
                 ? 'bg-teal-500 text-slate-950 shadow-md'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Direct MP3 Download Link</span>
+            <span>Direct Audio URL</span>
           </button>
           <button
             onClick={() => setActiveTab('embed')}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'embed'
                 ? 'bg-teal-500 text-slate-950 shadow-md'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
             <Code className="w-3.5 h-3.5" />
-            <span>Embed HTML</span>
+            <span>Embed</span>
           </button>
         </div>
 
@@ -155,30 +206,8 @@ export const ShareAudioModal: React.FC<ShareAudioModalProps> = ({
         {activeTab === 'app' && (
           <div className="space-y-4">
             <p className="text-xs text-slate-400">
-              When anyone opens this link, VoiceCraft AI opens with your text and voice pre-loaded, automatically generates the audio stream, and presents the live waveform player and download options.
+              Anyone opening this link will see your exact text pre-loaded with the selected voice ready to play and download:
             </p>
-
-            <div className="flex flex-wrap items-center gap-4 bg-slate-950/60 p-3 rounded-2xl border border-slate-800 text-xs text-slate-300">
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={autoGenerate}
-                  onChange={(e) => setAutoGenerate(e.target.checked)}
-                  className="rounded border-slate-700 text-teal-500 focus:ring-teal-500 bg-slate-900"
-                />
-                <span>Auto-synthesize speech on load</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={autoDownload}
-                  onChange={(e) => setAutoDownload(e.target.checked)}
-                  className="rounded border-slate-700 text-teal-500 focus:ring-teal-500 bg-slate-900"
-                />
-                <span>Auto-trigger MP3 download on load</span>
-              </label>
-            </div>
 
             <div className="flex items-center gap-2">
               <input
@@ -208,7 +237,7 @@ export const ShareAudioModal: React.FC<ShareAudioModalProps> = ({
                 target="_blank"
                 rel="noreferrer"
                 className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs transition-colors shrink-0"
-                title="Test in new tab"
+                title="Test link in new tab"
               >
                 <ExternalLink className="w-4 h-4" />
               </a>
@@ -216,7 +245,7 @@ export const ShareAudioModal: React.FC<ShareAudioModalProps> = ({
 
             {/* Social Share Buttons */}
             <div className="pt-2 border-t border-slate-800/80 space-y-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Share Directly To:</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">One-Click Share:</span>
               <div className="flex flex-wrap items-center gap-2">
                 <a
                   href={whatsappUrl}
@@ -254,7 +283,7 @@ export const ShareAudioModal: React.FC<ShareAudioModalProps> = ({
         {activeTab === 'direct' && (
           <div className="space-y-4">
             <p className="text-xs text-slate-400">
-              This standalone URL triggers an instant binary download of the synthesized <code className="text-teal-300">.mp3</code> file directly when clicked, perfect for sending in emails, chat messages, or automating via curl/scripts.
+              Direct endpoint that streams the synthesized <code className="text-teal-300">.mp3</code> file directly:
             </p>
 
             <div className="flex items-center gap-2">
@@ -280,20 +309,19 @@ export const ShareAudioModal: React.FC<ShareAudioModalProps> = ({
                   </>
                 )}
               </button>
-              <a
-                href={directDownloadUrl}
-                download={filename + '.mp3'}
-                className="p-2.5 bg-slate-800 hover:bg-slate-700 text-teal-300 rounded-xl text-xs transition-colors shrink-0"
-                title="Download MP3 now"
+              <button
+                onClick={handleDownloadMp3}
+                className="p-2.5 bg-slate-800 hover:bg-slate-700 text-teal-300 rounded-xl text-xs transition-colors shrink-0 cursor-pointer"
+                title="Download MP3 directly"
               >
                 <Download className="w-4 h-4" />
-              </a>
+              </button>
             </div>
 
             <div className="bg-slate-950/60 rounded-xl p-3 border border-slate-800/60">
-              <span className="text-[11px] font-semibold text-slate-400 block mb-1">CURL / Terminal Command:</span>
+              <span className="text-[11px] font-semibold text-slate-400 block mb-1">Terminal / cURL Command:</span>
               <code className="text-[11px] text-teal-300 font-mono block overflow-x-auto whitespace-pre">
-                curl -o output.mp3 "{directDownloadUrl}"
+                curl -o voice.mp3 "{directDownloadUrl}"
               </code>
             </div>
           </div>
@@ -303,13 +331,13 @@ export const ShareAudioModal: React.FC<ShareAudioModalProps> = ({
         {activeTab === 'embed' && (
           <div className="space-y-4">
             <p className="text-xs text-slate-400">
-              Embed this interactive voice player into any website, blog post, documentation page, or notion workspace.
+              Embed this voice generator into any website, blog post, or dashboard:
             </p>
 
             <div className="space-y-2">
               <textarea
                 readOnly
-                rows={4}
+                rows={3}
                 value={embedSnippet}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-teal-300 font-mono select-all focus:outline-none focus:border-teal-500 resize-none"
               />
@@ -336,8 +364,8 @@ export const ShareAudioModal: React.FC<ShareAudioModalProps> = ({
         )}
 
         {/* Footer info */}
-        <div className="border-t border-slate-800 pt-4 flex items-center justify-between text-xs text-slate-500">
-          <span>VoiceCraft AI Neural Studio</span>
+        <div className="border-t border-slate-800 pt-3 flex items-center justify-between text-xs text-slate-500">
+          <span>VoiceCraft AI Speech Studio</span>
           <button
             onClick={onClose}
             className="text-slate-400 hover:text-white font-medium cursor-pointer"

@@ -542,6 +542,7 @@ export const OpeningLandingPage: React.FC<OpeningLandingPageProps> = ({
         voice={sandboxVoice}
         preset={sandboxPreset}
         tab="overview"
+        audioUrl={sandboxAudioUrl || undefined}
       />
     </div>
   );
