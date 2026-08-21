@@ -31,6 +31,14 @@ export type VoiceName =
 
 export type AudioEngine = 'gemini' | 'studio' | 'browser';
 
+export interface VoicePersonalization {
+  pitch: number; // 0.75 (Deep) to 1.35 (Bright) - Default 1.0
+  speed: number; // 0.75x (Relaxed) to 1.75x (Fast) - Default 1.0
+  toneStyle: 'natural' | 'storyteller' | 'broadcast' | 'warm' | 'authoritative' | 'soothing';
+  volume: number; // 0.1 to 1.0 - Default 1.0
+  emphasis: 'standard' | 'expressive' | 'calm' | 'crisp';
+}
+
 export interface VoiceOption {
   id: VoiceName;
   name: string;

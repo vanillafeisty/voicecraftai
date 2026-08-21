@@ -26,10 +26,22 @@ import {
   Zap,
   Clock
 } from 'lucide-react';
-import { VoiceName, VoiceRegion, VoiceGender, VoiceCategory, VoiceOption, ConversationMessage } from '../types';
-import { VOICE_OPTIONS, downloadAudioFile, formatTime, downloadText, generateClientAudioDataUrl, speakBrowserSpeech, downloadServerAudioDirect } from '../utils/audioUtils';
+import { VoiceName, VoiceRegion, VoiceGender, VoiceCategory, VoiceOption, ConversationMessage, VoicePersonalization } from '../types';
+import { 
+  VOICE_OPTIONS, 
+  DEFAULT_PERSONALIZATION,
+  downloadAudioFile, 
+  formatTime, 
+  downloadText, 
+  generateClientAudioDataUrl, 
+  speakBrowserSpeech, 
+  downloadServerAudioDirect,
+  stopAllAudio,
+  playExclusiveAudio
+} from '../utils/audioUtils';
 import { SAMPLE_5000_WORD_TEXT } from '../data/sampleLongText';
 import { ShareAudioModal } from './ShareAudioModal';
+import { VoicePersonalizationPanel } from './VoicePersonalizationPanel';
 
 interface ConversationalAudioStudioProps {
   selectedVoice: VoiceName;
@@ -61,6 +73,9 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
 
+  // Single Voice Personalization State
+  const [personalization, setPersonalization] = useState<VoicePersonalization>(DEFAULT_PERSONALIZATION);
+
   // Voice Filtering State (Indian / International, Category & Gender)
   const [selectedRegion, setSelectedRegion] = useState<VoiceRegion>('Indian');
   const [selectedCategory, setSelectedCategory] = useState<VoiceCategory | 'All'>('All');
@@ -74,7 +89,6 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
   const [activePlayingId, setActivePlayingId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Share Modal State
@@ -116,6 +130,17 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
       generateAudioForMessage('msg-welcome', welcome.text, selectedVoice);
     }
   }, []);
+
+  // Sync active voice default settings when voice changes
+  useEffect(() => {
+    const vOpt = VOICE_OPTIONS.find(v => v.id === selectedVoice);
+    if (vOpt) {
+      setPersonalization(prev => ({
+        ...prev,
+        pitch: vOpt.pitch || 1.0,
+      }));
+    }
+  }, [selectedVoice]);
 
   // Auto trigger if opened with initial text & autoGenerate
   useEffect(() => {
@@ -193,17 +218,17 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
       }
 
       if (shouldAutoPlay) {
-        // Speak using high quality browser SpeechSynthesis + audio tag
-        speakBrowserSpeech(text, voiceName, (voiceOption?.rate || 1.0) * playbackSpeed);
+        // STRICT SINGLE VOICE: Stop all other audio before playing exclusively
+        stopAllAudio();
         if (audioRef.current && audioDataUrl) {
-          audioRef.current.src = audioDataUrl;
-          const targetRate = voiceOption ? voiceOption.rate * playbackSpeed : playbackSpeed;
-          audioRef.current.playbackRate = targetRate;
-          audioRef.current.play().then(() => {
-            setActivePlayingId(msgId);
-          }).catch(() => {
-            setActivePlayingId(msgId);
-          });
+          const targetRate = voiceOption ? voiceOption.rate * personalization.speed : personalization.speed;
+          playExclusiveAudio(audioRef.current, audioDataUrl, targetRate, personalization.volume)
+            .then(() => {
+              setActivePlayingId(msgId);
+            })
+            .catch(() => {
+              setActivePlayingId(msgId);
+            });
         }
       }
     } catch (err: any) {
@@ -224,6 +249,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
    * Plugs in and understands the text, then generates speech audio in the new voice immediately.
    */
   const handleSelectVoiceAndAutoGenerate = async (voice: VoiceOption) => {
+    stopAllAudio();
     onSelectVoice(voice.id);
     
     // Stop any playing sample audio
@@ -233,7 +259,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
     }
 
     const currentText = inputText.trim();
-    setVoiceNotice(`Plugged into ${voice.name} (${voice.tone}) - Synthesizing speech...`);
+    setVoiceNotice(`Plugged into ${voice.name} (${voice.tone}) - Single active audio channel`);
     setTimeout(() => setVoiceNotice(null), 3000);
 
     if (currentText) {
@@ -251,7 +277,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
       setMessages(prev => [...prev, asstMsg]);
       await generateAudioForMessage(assistantMsgId, currentText, voice.id, false, true);
     } else {
-      // If input is empty, re-synthesize the latest message or welcome message in the new voice
+      // If input is empty, re-synthesize the latest message in the new voice
       const lastMsg = [...messages].reverse().find(m => m.role === 'assistant');
       if (lastMsg) {
         const newMsgId = `asst-voice-switch-${Date.now()}`;
@@ -270,7 +296,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
   };
 
   /**
-   * Sample voice preview: plays the official sample line of that voice
+   * Sample voice preview: plays the official sample line of that voice exclusively
    */
   const handlePlayVoiceSample = async (voice: VoiceOption, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -284,12 +310,9 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
       }
     }
 
-    // Stop main audio player if active
-    if (audioRef.current && !audioRef.current.paused) {
-      audioRef.current.pause();
-      setActivePlayingId(null);
-    }
-
+    // Stop every other audio immediately
+    stopAllAudio();
+    setActivePlayingId(null);
     setSamplePlayingVoiceId(voice.id);
 
     try {
@@ -304,9 +327,17 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
 
       const data = await res.json();
       if (data.success && data.wavDataUrl && sampleAudioRef.current) {
-        sampleAudioRef.current.src = data.wavDataUrl;
-        sampleAudioRef.current.playbackRate = voice.rate;
-        sampleAudioRef.current.play().catch(() => {});
+        const effectiveRate = voice.rate * personalization.speed;
+        await playExclusiveAudio(sampleAudioRef.current, data.wavDataUrl, effectiveRate, personalization.volume);
+      } else {
+        await speakBrowserSpeech(
+          voice.sampleLine, 
+          voice.id, 
+          voice.rate * personalization.speed, 
+          personalization.pitch, 
+          personalization.volume
+        );
+        setSamplePlayingVoiceId(null);
       }
     } catch (err) {
       console.error('Error playing sample audio:', err);
@@ -352,12 +383,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
       return;
     }
 
-    // Stop sample audio if playing
-    if (sampleAudioRef.current && !sampleAudioRef.current.paused) {
-      sampleAudioRef.current.pause();
-      setSamplePlayingVoiceId(null);
-    }
-
+    // Toggle pause if currently playing this message
     if (activePlayingId === msg.id && audioRef.current) {
       if (!audioRef.current.paused) {
         audioRef.current.pause();
@@ -369,26 +395,31 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
       return;
     }
 
+    // Stop every other audio source first
+    stopAllAudio();
+    setSamplePlayingVoiceId(null);
+
     if (audioRef.current) {
       const voiceOption = VOICE_OPTIONS.find(v => v.id === (msg.voice || selectedVoice));
-      audioRef.current.src = msg.audioUrl;
-      const targetRate = voiceOption ? voiceOption.rate * playbackSpeed : playbackSpeed;
-      audioRef.current.playbackRate = targetRate;
-      audioRef.current.play().then(() => {
-        setActivePlayingId(msg.id);
-      }).catch(err => {
-        console.warn('Audio play error, triggering browser speech fallback:', err);
-        speakBrowserSpeech(msg.text, msg.voice || selectedVoice, targetRate);
-        setActivePlayingId(msg.id);
-      });
+      const targetRate = voiceOption ? voiceOption.rate * personalization.speed : personalization.speed;
+      
+      playExclusiveAudio(audioRef.current, msg.audioUrl, targetRate, personalization.volume)
+        .then(() => {
+          setActivePlayingId(msg.id);
+        })
+        .catch(err => {
+          console.warn('Audio play error, fallback to single speech utterance:', err);
+          speakBrowserSpeech(msg.text, msg.voice || selectedVoice, targetRate, personalization.pitch, personalization.volume);
+          setActivePlayingId(msg.id);
+        });
     } else {
-      speakBrowserSpeech(msg.text, msg.voice || selectedVoice, playbackSpeed);
+      speakBrowserSpeech(msg.text, msg.voice || selectedVoice, personalization.speed, personalization.pitch, personalization.volume);
       setActivePlayingId(msg.id);
     }
   };
 
   const handleSpeedChange = (speed: number) => {
-    setPlaybackSpeed(speed);
+    setPersonalization(prev => ({ ...prev, speed }));
     if (audioRef.current) {
       const activeMsg = messages.find(m => m.id === activePlayingId);
       const voiceOption = VOICE_OPTIONS.find(v => v.id === (activeMsg?.voice || selectedVoice));
@@ -524,11 +555,11 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                 Speech Synthesis & MP3 Studio
               </h1>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                5000+ Words Ready
+                Single Plug-in Audio
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              Parallel high-capacity engine synthesizes long documents, clinical notes, and books into continuous downloadable MP3 audio
+              Select and personalize exactly one active voice to transcribe and download crystal-clear continuous MP3 audio without voice collision
             </p>
           </div>
         </div>
@@ -573,6 +604,24 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
           </button>
         </div>
       </div>
+
+      {/* Voice Personalization & Single Plug-in Suite */}
+      <VoicePersonalizationPanel
+        selectedVoice={selectedVoice}
+        onSelectVoice={(v) => {
+          stopAllAudio();
+          onSelectVoice(v);
+        }}
+        personalization={personalization}
+        onUpdatePersonalization={(patch) => setPersonalization(prev => ({ ...prev, ...patch }))}
+        onResetPersonalization={() => {
+          const vOpt = VOICE_OPTIONS.find(v => v.id === selectedVoice);
+          setPersonalization({
+            ...DEFAULT_PERSONALIZATION,
+            pitch: vOpt?.pitch || 1.0,
+          });
+        }}
+      />
 
       {uploadStatus && (
         <div className="bg-teal-950/80 border border-teal-500/50 text-teal-200 px-4 py-2.5 rounded-2xl text-xs flex items-center gap-2 animate-in fade-in shadow-lg">

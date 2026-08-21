@@ -1,4 +1,73 @@
-import { VoiceOption, ContextPreset, VoiceName, VoiceCategory } from '../types';
+import { VoiceOption, ContextPreset, VoiceName, VoiceCategory, VoicePersonalization } from '../types';
+
+export const DEFAULT_PERSONALIZATION: VoicePersonalization = {
+  pitch: 1.0,
+  speed: 1.0,
+  toneStyle: 'natural',
+  volume: 1.0,
+  emphasis: 'standard',
+};
+
+/**
+ * Global audio registry to ensure ONLY ONE voice/audio channel plays at any time.
+ * Absolutely eliminates double voice / overlapping audio issues.
+ */
+let currentlyPlayingAudioElement: HTMLAudioElement | null = null;
+
+export function stopAllAudio(): void {
+  // 1. Cancel browser speech synthesis immediately
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // 2. Pause and reset any registered playing audio element
+  if (currentlyPlayingAudioElement) {
+    try {
+      currentlyPlayingAudioElement.pause();
+      currentlyPlayingAudioElement.currentTime = 0;
+    } catch (e) {
+      // ignore
+    }
+    currentlyPlayingAudioElement = null;
+  }
+
+  // 3. Find and pause all audio elements in the DOM to be 100% foolproof
+  if (typeof document !== 'undefined') {
+    const allAudios = document.querySelectorAll('audio');
+    allAudios.forEach((a) => {
+      try {
+        if (!a.paused) {
+          a.pause();
+        }
+      } catch (e) {
+        // ignore
+      }
+    });
+  }
+}
+
+/**
+ * Plays an audio element exclusively, stopping every other sound in the browser first.
+ */
+export async function playExclusiveAudio(
+  audioEl: HTMLAudioElement,
+  src?: string,
+  rate = 1.0,
+  volume = 1.0
+): Promise<void> {
+  stopAllAudio();
+  if (src && audioEl.src !== src) {
+    audioEl.src = src;
+  }
+  audioEl.playbackRate = Math.max(0.5, Math.min(2.5, rate));
+  audioEl.volume = Math.max(0, Math.min(1, volume));
+  currentlyPlayingAudioElement = audioEl;
+  await audioEl.play();
+}
 
 export const VOICE_OPTIONS: VoiceOption[] = [
   // 🇮🇳 INDIAN VOICES
@@ -465,19 +534,28 @@ export function generateClientAudioDataUrl(durationSeconds = 3, freq = 440): str
 }
 
 /**
- * Speaks text using the browser SpeechSynthesis engine if available
+ * Speaks text using the browser SpeechSynthesis engine if available.
+ * Guaranteed to stop any existing audio stream first.
  */
-export function speakBrowserSpeech(text: string, voiceName: string, rate = 1.0): Promise<boolean> {
+export function speakBrowserSpeech(
+  text: string, 
+  voiceName: string, 
+  rate = 1.0, 
+  pitch = 1.0, 
+  volume = 1.0
+): Promise<boolean> {
   return new Promise((resolve) => {
+    stopAllAudio();
     if (typeof window === 'undefined' || !window.speechSynthesis) {
       resolve(false);
       return;
     }
 
     try {
-      window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = rate;
+      utterance.rate = Math.max(0.5, Math.min(2.0, rate));
+      utterance.pitch = Math.max(0.5, Math.min(1.8, pitch));
+      utterance.volume = Math.max(0, Math.min(1, volume));
 
       const voices = window.speechSynthesis.getVoices();
       const voiceOption = VOICE_OPTIONS.find(v => v.id === voiceName);
