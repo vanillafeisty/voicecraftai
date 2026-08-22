@@ -466,9 +466,10 @@ export function downloadAudioFile(dataUrl: string, baseName: string): void {
 }
 
 /**
- * Encodes an AudioBuffer into a standard 16-bit PCM WAV Blob.
+ * High-performance non-blocking AudioBuffer to WAV Blob converter.
+ * Processes audio in chunks and yields to the browser event loop, preventing UI freezing on long audio (30+ minutes / 5,000+ words).
  */
-export function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
+export async function audioBufferToWavBlobAsync(buffer: AudioBuffer): Promise<Blob> {
   const numChannels = buffer.numberOfChannels;
   const sampleRate = buffer.sampleRate;
   const format = 1; // 1 = PCM
@@ -507,7 +508,68 @@ export function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
   writeString(36, 'data');
   view.setUint32(40, dataSize, true);
 
-  // Interleave channels & write 16-bit PCM samples
+  // Extract channel Float32Arrays
+  const channels: Float32Array[] = [];
+  for (let c = 0; c < numChannels; c++) {
+    channels.push(buffer.getChannelData(c));
+  }
+
+  // Process in non-blocking chunks of 250,000 samples so the UI never stutters or freezes
+  const chunkSize = 250000;
+  let offset = 44;
+
+  for (let start = 0; start < numSamples; start += chunkSize) {
+    const end = Math.min(start + chunkSize, numSamples);
+    
+    for (let i = start; i < end; i++) {
+      for (let c = 0; c < numChannels; c++) {
+        const sample = channels[c][i];
+        // Fast clamp and integer scale
+        const clamped = sample < -1 ? -1 : sample > 1 ? 1 : sample;
+        const intSample = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+        view.setInt16(offset, intSample, true);
+        offset += 2;
+      }
+    }
+
+    // Yield back to browser event loop every chunk
+    if (end < numSamples) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  }
+
+  return new Blob([arrayBuffer], { type: 'audio/wav' });
+}
+
+export function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
+  const numChannels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const numSamples = buffer.length;
+  const blockAlign = numChannels * 2;
+  const dataSize = numSamples * blockAlign;
+  const arrayBuffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(arrayBuffer);
+
+  const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+
   const channels: Float32Array[] = [];
   for (let c = 0; c < numChannels; c++) {
     channels.push(buffer.getChannelData(c));
@@ -516,12 +578,9 @@ export function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
   let offset = 44;
   for (let i = 0; i < numSamples; i++) {
     for (let c = 0; c < numChannels; c++) {
-      let sample = channels[c][i];
-      // Clamp between -1.0 and 1.0
-      sample = Math.max(-1, Math.min(1, sample));
-      // Scale to 16-bit signed integer
-      const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-      view.setInt16(offset, intSample, true);
+      const s = channels[c][i];
+      const clamped = s < -1 ? -1 : s > 1 ? 1 : s;
+      view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
       offset += 2;
     }
   }
@@ -530,86 +589,9 @@ export function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
 }
 
 /**
- * Pitch-preserving time stretch (WSOLA: Waveform Similarity Overlap-Add).
- * Speeds up or slows down audio duration while strictly preserving vocal pitch and timbre.
- * Guarantees that downloaded audio at different speeds sounds identical to browser player.
- */
-export function timeStretchPitchPreserved(
-  inputBuffer: AudioBuffer,
-  speed: number,
-  audioCtx: BaseAudioContext
-): AudioBuffer {
-  if (Math.abs(speed - 1.0) < 0.01) {
-    return inputBuffer;
-  }
-
-  const numChannels = inputBuffer.numberOfChannels;
-  const sampleRate = inputBuffer.sampleRate;
-  const inputLen = inputBuffer.length;
-  const outputLen = Math.max(1, Math.round(inputLen / speed));
-
-  const outputBuffer = audioCtx.createBuffer(numChannels, outputLen, sampleRate);
-
-  // Frame size ~25ms-30ms is optimal for speech fundamental frequency
-  const windowSize = Math.min(2048, Math.max(512, Math.pow(2, Math.round(Math.log2(sampleRate * 0.028)))));
-  const hopOut = Math.floor(windowSize / 2);
-  const hopIn = Math.round(hopOut * speed);
-
-  // Smooth Hann window for artifact-free crossfading
-  const window = new Float32Array(windowSize);
-  for (let i = 0; i < windowSize; i++) {
-    window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (windowSize - 1)));
-  }
-
-  for (let c = 0; c < numChannels; c++) {
-    const inputData = inputBuffer.getChannelData(c);
-    const outputData = outputBuffer.getChannelData(c);
-
-    let inPos = 0;
-    let outPos = 0;
-    const maxSearchOffset = Math.floor(windowSize / 4);
-
-    while (outPos + windowSize < outputLen && inPos + windowSize + maxSearchOffset < inputLen) {
-      let bestOffset = 0;
-      let maxCorr = -Infinity;
-
-      if (outPos > 0) {
-        for (let offset = -maxSearchOffset; offset <= maxSearchOffset; offset++) {
-          const testPos = inPos + offset;
-          if (testPos < 0 || testPos + windowSize >= inputLen) continue;
-
-          let corr = 0;
-          for (let i = 0; i < windowSize; i += 4) {
-            corr += inputData[testPos + i] * outputData[outPos + i - hopOut];
-          }
-          if (corr > maxCorr) {
-            maxCorr = corr;
-            bestOffset = offset;
-          }
-        }
-      }
-
-      const optimalInPos = Math.max(0, Math.min(inputLen - windowSize, inPos + bestOffset));
-
-      for (let i = 0; i < windowSize; i++) {
-        outputData[outPos + i] += inputData[optimalInPos + i] * window[i];
-      }
-
-      outPos += hopOut;
-      inPos += hopIn;
-    }
-
-    // Normalize output bounds
-    for (let i = 0; i < outputLen; i++) {
-      outputData[i] = Math.max(-1.0, Math.min(1.0, outputData[i]));
-    }
-  }
-
-  return outputBuffer;
-}
-
-/**
- * Downloads the exact audio heard in the browser with pitch-preserved speed adjustment.
+ * Downloads the audio with zero UI freezing, supporting 5,000+ words / 30+ minute files.
+ * If speed is 1.0x, triggers an instant direct download.
+ * If speed != 1.0x, renders asynchronously using native browser background audio threads.
  */
 export async function adjustAudioSpeedAndDownload(
   audioDataUrlOrBlob: string,
@@ -622,18 +604,17 @@ export async function adjustAudioSpeedAndDownload(
 
   if (!audioDataUrlOrBlob) return;
 
-  // If 1.0x standard speed, directly download the pristine original file immediately!
+  // 1. If standard 1.0x speed, use instant download with zero processing time!
   if (Math.abs(speed - 1.0) < 0.01) {
     downloadAudioFile(audioDataUrlOrBlob, cleanBase);
     return;
   }
 
   try {
-    // 1. Fetch data URL into ArrayBuffer
+    // 2. Fetch data URL / blob into ArrayBuffer
     const res = await fetch(audioDataUrlOrBlob);
     const arrayBuf = await res.arrayBuffer();
 
-    // 2. Decode with standard AudioContext
     const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioCtxClass) {
       downloadAudioFile(audioDataUrlOrBlob, `${cleanBase}_${speed}x`);
@@ -642,13 +623,30 @@ export async function adjustAudioSpeedAndDownload(
 
     const tempCtx = new AudioCtxClass();
     const decodedBuffer = await tempCtx.decodeAudioData(arrayBuf);
-
-    // 3. Apply pitch-preserving time stretch
-    const stretchedBuffer = timeStretchPitchPreserved(decodedBuffer, speed, tempCtx);
     await tempCtx.close();
 
-    // 4. Encode stretched buffer into standard 16-bit PCM WAV Blob
-    const wavBlob = audioBufferToWavBlob(stretchedBuffer);
+    // 3. Render at target speed using hardware-accelerated OfflineAudioContext (C++ background thread)
+    const numChannels = decodedBuffer.numberOfChannels;
+    const sampleRate = decodedBuffer.sampleRate;
+    const outputLength = Math.max(1, Math.ceil(decodedBuffer.length / speed));
+
+    const OfflineCtxClass = window.OfflineAudioContext || (window as any).webkitOfflineAudioContext;
+    if (!OfflineCtxClass) {
+      downloadAudioFile(audioDataUrlOrBlob, `${cleanBase}_${speed}x`);
+      return;
+    }
+
+    const offlineCtx = new OfflineCtxClass(numChannels, outputLength, sampleRate);
+    const source = offlineCtx.createBufferSource();
+    source.buffer = decodedBuffer;
+    source.playbackRate.value = speed;
+    source.connect(offlineCtx.destination);
+    source.start(0);
+
+    const renderedBuffer = await offlineCtx.startRendering();
+
+    // 4. Encode into WAV Blob using non-blocking asynchronous yielding
+    const wavBlob = await audioBufferToWavBlobAsync(renderedBuffer);
     const blobUrl = URL.createObjectURL(wavBlob);
 
     const link = document.createElement('a');
@@ -661,9 +659,9 @@ export async function adjustAudioSpeedAndDownload(
     setTimeout(() => {
       if (link.parentNode) document.body.removeChild(link);
       URL.revokeObjectURL(blobUrl);
-    }, 3000);
+    }, 5000);
   } catch (err) {
-    console.warn('Pitch-preserved audio stretch fallback, downloading original file:', err);
+    console.warn('Audio speed render fallback, downloading original file:', err);
     downloadAudioFile(audioDataUrlOrBlob, `${cleanBase}_${speed}x`);
   }
 }
