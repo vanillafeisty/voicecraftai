@@ -465,6 +465,148 @@ export function downloadAudioFile(dataUrl: string, baseName: string): void {
   downloadDataUrl(dataUrl, filename);
 }
 
+/**
+ * Encodes an AudioBuffer into a standard 16-bit PCM WAV Blob.
+ */
+export function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
+  const numChannels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const format = 1; // 1 = PCM
+  const bitDepth = 16;
+  const numSamples = buffer.length;
+  const bytesPerSample = bitDepth / 8;
+  const blockAlign = numChannels * bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = numSamples * blockAlign;
+  const headerSize = 44;
+  const totalSize = headerSize + dataSize;
+
+  const arrayBuffer = new ArrayBuffer(totalSize);
+  const view = new DataView(arrayBuffer);
+
+  const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  // RIFF identifier
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, 'WAVE');
+  // format chunk identifier
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitDepth, true);
+  // data chunk identifier
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  // Interleave channels & write 16-bit PCM samples
+  const channels: Float32Array[] = [];
+  for (let c = 0; c < numChannels; c++) {
+    channels.push(buffer.getChannelData(c));
+  }
+
+  let offset = 44;
+  for (let i = 0; i < numSamples; i++) {
+    for (let c = 0; c < numChannels; c++) {
+      let sample = channels[c][i];
+      // Clamp between -1.0 and 1.0
+      sample = Math.max(-1, Math.min(1, sample));
+      // Scale to 16-bit signed integer
+      const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      view.setInt16(offset, intSample, true);
+      offset += 2;
+    }
+  }
+
+  return new Blob([arrayBuffer], { type: 'audio/wav' });
+}
+
+/**
+ * Stretches/resamples audio to the target playback speed and downloads the resulting audio file.
+ * If speed is 1.0, downloads the original audio directly.
+ */
+export async function adjustAudioSpeedAndDownload(
+  audioDataUrlOrBlob: string,
+  baseName: string,
+  speed = 1.0
+): Promise<void> {
+  const cleanBase = baseName.replace(/\.(wav|mp3)$/i, '');
+  const speedLabel = speed === 1.0 ? '' : `_${speed}x`;
+  const filename = `${cleanBase}${speedLabel}.wav`;
+
+  if (!audioDataUrlOrBlob) return;
+
+  // If standard 1.0x speed, use standard instant download
+  if (Math.abs(speed - 1.0) < 0.01) {
+    downloadAudioFile(audioDataUrlOrBlob, cleanBase);
+    return;
+  }
+
+  try {
+    // 1. Fetch data url into ArrayBuffer
+    const res = await fetch(audioDataUrlOrBlob);
+    const arrayBuf = await res.arrayBuffer();
+
+    // 2. Decode with standard AudioContext
+    const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtxClass) {
+      downloadAudioFile(audioDataUrlOrBlob, `${cleanBase}_${speed}x`);
+      return;
+    }
+
+    const tempCtx = new AudioCtxClass();
+    const decodedBuffer = await tempCtx.decodeAudioData(arrayBuf);
+    await tempCtx.close();
+
+    // 3. Render at new playback speed with OfflineAudioContext
+    const numChannels = decodedBuffer.numberOfChannels;
+    const sampleRate = decodedBuffer.sampleRate;
+    const outputLength = Math.max(1, Math.ceil(decodedBuffer.length / speed));
+
+    const OfflineCtxClass = window.OfflineAudioContext || (window as any).webkitOfflineAudioContext;
+    if (!OfflineCtxClass) {
+      downloadAudioFile(audioDataUrlOrBlob, `${cleanBase}_${speed}x`);
+      return;
+    }
+
+    const offlineCtx = new OfflineCtxClass(numChannels, outputLength, sampleRate);
+    const source = offlineCtx.createBufferSource();
+    source.buffer = decodedBuffer;
+    source.playbackRate.value = speed;
+    source.connect(offlineCtx.destination);
+    source.start(0);
+
+    const renderedBuffer = await offlineCtx.startRendering();
+
+    // 4. Encode renderedBuffer into standard 16-bit PCM WAV Blob
+    const wavBlob = audioBufferToWavBlob(renderedBuffer);
+    const blobUrl = URL.createObjectURL(wavBlob);
+
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+
+    setTimeout(() => {
+      if (link.parentNode) document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    }, 3000);
+  } catch (err) {
+    console.warn('Audio speed render fallback, downloading original file:', err);
+    downloadAudioFile(audioDataUrlOrBlob, `${cleanBase}_${speed}x`);
+  }
+}
+
 export function downloadText(content: string, filename: string, mimeType = 'text/plain'): void {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);

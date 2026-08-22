@@ -27,7 +27,9 @@ import {
   Clock,
   Power,
   Sliders,
-  Plus
+  Plus,
+  Minus,
+  Gauge
 } from 'lucide-react';
 import { 
   VoiceName, 
@@ -44,6 +46,7 @@ import {
   VOICE_OPTIONS, 
   DEFAULT_PERSONALIZATION,
   downloadAudioFile, 
+  adjustAudioSpeedAndDownload,
   formatTime, 
   downloadText, 
   generateClientAudioDataUrl, 
@@ -111,6 +114,8 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [msgSpeeds, setMsgSpeeds] = useState<Record<string, number>>({});
+  const [downloadingMsgId, setDownloadingMsgId] = useState<string | null>(null);
 
   // Share Modal State
   const [shareModalData, setShareModalData] = useState<{
@@ -359,6 +364,25 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
     await generateAudioForMessage(assistantMsgId, textToSend, selectedVoice, false, true);
   };
 
+  const getMsgSpeed = (msgId: string): number => {
+    return msgSpeeds[msgId] ?? personalization.speed ?? 1.0;
+  };
+
+  const handleMessageSpeedChange = (msgId: string, speed: number) => {
+    const rounded = Math.round(Math.max(0.5, Math.min(2.5, speed)) * 100) / 100;
+    setMsgSpeeds(prev => ({ ...prev, [msgId]: rounded }));
+    if (activePlayingId === msgId && audioRef.current) {
+      const activeMsg = messages.find(m => m.id === msgId);
+      const voiceOption = VOICE_OPTIONS.find(v => v.id === (activeMsg?.voice || selectedVoice));
+      audioRef.current.playbackRate = voiceOption ? voiceOption.rate * rounded : rounded;
+    }
+  };
+
+  const handleStepMessageSpeed = (msgId: string, delta: number) => {
+    const current = getMsgSpeed(msgId);
+    handleMessageSpeedChange(msgId, current + delta);
+  };
+
   const handlePlayAudio = (msg: ConversationMessage) => {
     if (!msg.audioUrl) {
       generateAudioForMessage(msg.id, msg.text, msg.voice || selectedVoice, false, true);
@@ -381,7 +405,8 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
 
     if (audioRef.current) {
       const voiceOption = VOICE_OPTIONS.find(v => v.id === (msg.voice || selectedVoice)) || VOICE_OPTIONS[0];
-      const targetRate = voiceOption.rate * personalization.speed;
+      const msgSpeed = getMsgSpeed(msg.id);
+      const targetRate = voiceOption.rate * msgSpeed;
 
       audioRef.current.src = msg.audioUrl;
       audioRef.current.playbackRate = targetRate;
@@ -422,13 +447,24 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
     }
   };
 
-  const handleDownloadFullAudio = (msg: ConversationMessage) => {
+  const handleDownloadFullAudio = async (msg: ConversationMessage) => {
     const voiceToUse = msg.voice || selectedVoice;
-    const filename = `VoiceCraft_${voiceToUse}_Speech_${Date.now()}`;
-    if (msg.audioUrl && msg.audioUrl.startsWith('data:')) {
-      downloadAudioFile(msg.audioUrl, filename);
-    } else {
-      downloadServerAudioDirect(msg.text, voiceToUse, filename);
+    const speed = getMsgSpeed(msg.id);
+    const speedSuffix = Math.abs(speed - 1.0) < 0.01 ? '' : `_${speed}x`;
+    const cleanSnippet = (msg.text || 'Speech').slice(0, 20).replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `VoiceCraft_${voiceToUse}_${cleanSnippet}${speedSuffix}_${Date.now()}`;
+    
+    setDownloadingMsgId(msg.id);
+    try {
+      if (msg.audioUrl && msg.audioUrl.startsWith('data:')) {
+        await adjustAudioSpeedAndDownload(msg.audioUrl, filename, speed);
+      } else {
+        await downloadServerAudioDirect(msg.text, voiceToUse, filename);
+      }
+    } catch (err) {
+      console.error('Audio download error:', err);
+    } finally {
+      setDownloadingMsgId(null);
     }
   };
 
@@ -995,19 +1031,8 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                           />
                         </div>
 
-                        {/* Action Buttons: Download MP3, Share, Copy */}
+                        {/* Action Buttons: Share & Copy */}
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {/* Download .MP3 Button */}
-                          <button
-                            id={`download-msg-mp3-${msg.id}`}
-                            onClick={() => handleDownloadFullAudio(msg)}
-                            className="px-3.5 py-2 bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-md shadow-teal-500/20 active:scale-95 cursor-pointer"
-                            title="Download Audio File (.mp3)"
-                          >
-                            <Download className="w-4 h-4" />
-                            <span>Download MP3</span>
-                          </button>
-
                           {/* Share Link Button */}
                           <button
                             id={`share-msg-btn-${msg.id}`}
@@ -1017,7 +1042,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                               voice: msg.voice || selectedVoice,
                               audioUrl: msg.audioUrl,
                             })}
-                            className="p-2 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-teal-300 rounded-xl border border-slate-700 transition-colors cursor-pointer"
+                            className="p-2.5 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-teal-300 rounded-xl border border-slate-700 transition-colors cursor-pointer"
                             title="Share Audio Link"
                           >
                             <Share2 className="w-4 h-4 text-teal-400" />
@@ -1026,7 +1051,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                           {/* Copy Text Button */}
                           <button
                             onClick={() => handleCopyText(msg.id, msg.text)}
-                            className="p-2 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-teal-300 rounded-xl border border-slate-700 transition-colors cursor-pointer"
+                            className="p-2.5 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-teal-300 rounded-xl border border-slate-700 transition-colors cursor-pointer"
                             title="Copy Text"
                           >
                             {copiedId === msg.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
@@ -1034,30 +1059,89 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                         </div>
                       </div>
 
-                      {/* Speed Selector Chips (when playing) */}
-                      {isPlayingThis && (
-                        <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800/80">
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5 text-slate-400" />
-                            <span>Playback Speed:</span>
-                          </span>
-                          <div className="flex items-center gap-1">
-                            {[0.75, 1.0, 1.25, 1.5, 2.0].map((rate) => (
+                      {/* Speed Increase/Decrease & Download Section (Below Generated Audio) */}
+                      {(() => {
+                        const currentMsgSpeed = getMsgSpeed(msg.id);
+                        const isDownloadingThis = downloadingMsgId === msg.id;
+
+                        return (
+                          <div className="pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
+                            {/* Speed Controls: Decrease, Increase, Quick Presets */}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="flex items-center gap-1.5 text-xs text-slate-300 font-semibold">
+                                <Clock className="w-3.5 h-3.5 text-teal-400" />
+                                <span>Speed:</span>
+                                <span className="font-mono text-teal-300 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-750 text-xs font-bold">
+                                  {currentMsgSpeed.toFixed(2).replace(/\.?0+$/, '')}x
+                                </span>
+                              </div>
+
+                              {/* - and + Buttons to Decrease / Increase Speed */}
+                              <div className="flex items-center gap-0.5 bg-slate-900 p-0.5 rounded-xl border border-slate-800">
+                                <button
+                                  onClick={() => handleStepMessageSpeed(msg.id, -0.1)}
+                                  disabled={currentMsgSpeed <= 0.5}
+                                  className="p-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                                  title="Decrease speed by 0.1x"
+                                >
+                                  <Minus className="w-3.5 h-3.5" />
+                                </button>
+                                <span className="text-[10px] text-slate-500 font-mono px-1">adj</span>
+                                <button
+                                  onClick={() => handleStepMessageSpeed(msg.id, 0.1)}
+                                  disabled={currentMsgSpeed >= 2.5}
+                                  className="p-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                                  title="Increase speed by 0.1x"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+
+                              {/* Quick Speed Preset Chips */}
+                              <div className="flex items-center gap-1 flex-wrap">
+                                {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((rate) => (
+                                  <button
+                                    key={rate}
+                                    onClick={() => handleMessageSpeedChange(msg.id, rate)}
+                                    className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                                      Math.abs(currentMsgSpeed - rate) < 0.01
+                                        ? 'bg-teal-500 text-slate-950 font-extrabold shadow-sm'
+                                        : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800'
+                                    }`}
+                                  >
+                                    {rate}x
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Download Button (downloads according to the selected speed) */}
+                            <div className="flex items-center gap-2">
                               <button
-                                key={rate}
-                                onClick={() => handleSpeedChange(rate)}
-                                className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                                  personalization.speed === rate
-                                    ? 'bg-teal-500 text-slate-950'
-                                    : 'bg-slate-800 text-slate-400 hover:text-white'
-                                }`}
+                                id={`download-msg-mp3-${msg.id}`}
+                                onClick={() => handleDownloadFullAudio(msg)}
+                                disabled={isDownloadingThis}
+                                className="px-4 py-2 bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-teal-500/20 active:scale-95 cursor-pointer"
+                                title={`Download speech audio rendered at ${currentMsgSpeed.toFixed(2).replace(/\.?0+$/, '')}x speed`}
                               >
-                                {rate}x
+                                {isDownloadingThis ? (
+                                  <>
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                    <span>Rendering & Downloading...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-3.5 h-3.5" />
+                                    <span>
+                                      Download Audio ({currentMsgSpeed.toFixed(2).replace(/\.?0+$/, '')}x)
+                                    </span>
+                                  </>
+                                )}
                               </button>
-                            ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   </div>
                 )}

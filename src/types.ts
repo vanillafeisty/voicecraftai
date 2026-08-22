@@ -85,6 +85,7 @@ export interface ConversationMessage {
   isGenerating?: boolean;
   error?: string;
   contextPreset?: ContextPresetId;
+  speed?: number;
 }
 
 export interface TextToSpeechRequest {

@@ -12,10 +12,13 @@ import {
   ArrowRight,
   Radio, 
   Share2,
-  RefreshCw
+  RefreshCw,
+  Plus,
+  Minus,
+  Clock
 } from 'lucide-react';
 import { VoiceName, ContextPresetId } from '../types';
-import { VOICE_OPTIONS, CONTEXT_PRESETS, downloadAudioFile, formatTime } from '../utils/audioUtils';
+import { VOICE_OPTIONS, CONTEXT_PRESETS, downloadAudioFile, adjustAudioSpeedAndDownload, formatTime } from '../utils/audioUtils';
 import { ShareAudioModal } from './ShareAudioModal';
 
 interface OpeningLandingPageProps {
@@ -81,6 +84,8 @@ export const OpeningLandingPage: React.FC<OpeningLandingPageProps> = ({
   const [isPlayingSandbox, setIsPlayingSandbox] = useState<boolean>(false);
   const [sandboxCurrentTime, setSandboxCurrentTime] = useState<number>(0);
   const [sandboxDuration, setSandboxDuration] = useState<number>(0);
+  const [sandboxSpeed, setSandboxSpeed] = useState<number>(1.0);
+  const [isDownloadingSandbox, setIsDownloadingSandbox] = useState<boolean>(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
 
   // Active Voice Showcase preview card state
@@ -151,7 +156,39 @@ export const OpeningLandingPage: React.FC<OpeningLandingPageProps> = ({
       audioRef.current.pause();
       setIsPlayingSandbox(false);
     } else {
+      audioRef.current.playbackRate = sandboxSpeed;
       audioRef.current.play().then(() => setIsPlayingSandbox(true)).catch(() => {});
+    }
+  };
+
+  const handleSandboxSpeedChange = (speed: number) => {
+    const rounded = Math.round(Math.max(0.5, Math.min(2.5, speed)) * 100) / 100;
+    setSandboxSpeed(rounded);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = rounded;
+    }
+  };
+
+  const handleStepSandboxSpeed = (delta: number) => {
+    handleSandboxSpeedChange(sandboxSpeed + delta);
+  };
+
+  const handleDownloadSandboxAudio = async () => {
+    if (!sandboxAudioUrl) return;
+    const speedSuffix = Math.abs(sandboxSpeed - 1.0) < 0.01 ? '' : `_${sandboxSpeed}x`;
+    const filename = `VoiceCraft_${sandboxVoice}_Demo${speedSuffix}_${Date.now()}`;
+    
+    setIsDownloadingSandbox(true);
+    try {
+      if (sandboxAudioUrl.startsWith('data:')) {
+        await adjustAudioSpeedAndDownload(sandboxAudioUrl, filename, sandboxSpeed);
+      } else {
+        downloadAudioFile(sandboxAudioUrl, filename);
+      }
+    } catch (err) {
+      console.error('Download error:', err);
+    } finally {
+      setIsDownloadingSandbox(false);
     }
   };
 
@@ -411,39 +448,113 @@ export const OpeningLandingPage: React.FC<OpeningLandingPageProps> = ({
 
           {/* Sandbox Audio Player Strip */}
           {sandboxAudioUrl && (
-            <div className="bg-slate-950/80 rounded-2xl border border-slate-800 p-4 flex items-center gap-4">
-              <button
-                onClick={handleTogglePlay}
-                className="w-10 h-10 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 flex items-center justify-center shrink-0 transition-transform active:scale-95 cursor-pointer shadow-md"
-              >
-                {isPlayingSandbox ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
-              </button>
+            <div className="bg-slate-950/80 rounded-2xl border border-slate-800 p-4 space-y-3">
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={handleTogglePlay}
+                  className="w-10 h-10 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 flex items-center justify-center shrink-0 transition-transform active:scale-95 cursor-pointer shadow-md"
+                >
+                  {isPlayingSandbox ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+                </button>
 
-              <div className="flex-1 space-y-1">
-                <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span className="font-semibold text-slate-200 flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>
-                    {sandboxVoice} • Synthesized Audio
-                  </span>
-                  <span>{formatTime(sandboxCurrentTime)} / {formatTime(sandboxDuration)}</span>
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>
+                      {sandboxVoice} • Synthesized Audio
+                    </span>
+                    <span>{formatTime(sandboxCurrentTime)} / {formatTime(sandboxDuration)}</span>
+                  </div>
+                  
+                  {/* Visualizer bars */}
+                  <div className="flex items-center gap-1 h-5 py-0.5">
+                    {[...Array(24)].map((_, i) => (
+                      <div
+                        key={i}
+                        className={`flex-1 rounded-full transition-all duration-150 ${
+                          isPlayingSandbox 
+                            ? 'bg-gradient-to-t from-teal-500 to-cyan-400' 
+                            : 'bg-slate-800'
+                        }`}
+                        style={{
+                          height: isPlayingSandbox ? `${Math.max(20, Math.sin((i + sandboxCurrentTime * 5)) * 100)}%` : '20%',
+                        }}
+                      />
+                    ))}
+                  </div>
                 </div>
-                
-                {/* Visualizer bars */}
-                <div className="flex items-center gap-1 h-5 py-0.5">
-                  {[...Array(24)].map((_, i) => (
-                    <div
-                      key={i}
-                      className={`flex-1 rounded-full transition-all duration-150 ${
-                        isPlayingSandbox 
-                          ? 'bg-gradient-to-t from-teal-500 to-cyan-400' 
-                          : 'bg-slate-800'
-                      }`}
-                      style={{
-                        height: isPlayingSandbox ? `${Math.max(20, Math.sin((i + sandboxCurrentTime * 5)) * 100)}%` : '20%',
-                      }}
-                    />
-                  ))}
+              </div>
+
+              {/* Speed Controls & Download Bar */}
+              <div className="pt-2.5 border-t border-slate-850 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1 text-xs text-slate-300 font-semibold">
+                    <Clock className="w-3.5 h-3.5 text-teal-400" />
+                    <span>Speed:</span>
+                    <span className="font-mono text-teal-300 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-750 text-xs font-bold">
+                      {sandboxSpeed.toFixed(2).replace(/\.?0+$/, '')}x
+                    </span>
+                  </div>
+
+                  {/* +/- Step Controls */}
+                  <div className="flex items-center gap-0.5 bg-slate-900 p-0.5 rounded-xl border border-slate-800">
+                    <button
+                      onClick={() => handleStepSandboxSpeed(-0.1)}
+                      disabled={sandboxSpeed <= 0.5}
+                      className="p-1 rounded-lg text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                      title="Decrease speed (-0.1x)"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="text-[10px] text-slate-500 font-mono px-1">adj</span>
+                    <button
+                      onClick={() => handleStepSandboxSpeed(0.1)}
+                      disabled={sandboxSpeed >= 2.5}
+                      className="p-1 rounded-lg text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                      title="Increase speed (+0.1x)"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Speed Preset Chips */}
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((rate) => (
+                      <button
+                        key={rate}
+                        onClick={() => handleSandboxSpeedChange(rate)}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                          Math.abs(sandboxSpeed - rate) < 0.01
+                            ? 'bg-teal-500 text-slate-950 font-extrabold shadow-sm'
+                            : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800'
+                        }`}
+                      >
+                        {rate}x
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                {/* Download Audio */}
+                <button
+                  id="sandbox-download-mp3-btn"
+                  onClick={handleDownloadSandboxAudio}
+                  disabled={isDownloadingSandbox}
+                  className="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 disabled:opacity-50 text-slate-950 font-bold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-md shadow-teal-500/20 active:scale-95 cursor-pointer"
+                  title={`Download audio rendered at ${sandboxSpeed.toFixed(2).replace(/\.?0+$/, '')}x speed`}
+                >
+                  {isDownloadingSandbox ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Rendering...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download Audio ({sandboxSpeed.toFixed(2).replace(/\.?0+$/, '')}x)</span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
           )}

@@ -17,10 +17,20 @@ import {
   Upload,
   Zap,
   Power,
-  Radio
+  Radio,
+  Plus,
+  Minus
 } from 'lucide-react';
 import { VoiceName, MAX_PLUGGED_VOICES, MIN_PLUGGED_VOICES } from '../types';
-import { VOICE_OPTIONS, downloadAudioFile, formatTime, downloadServerAudioDirect, stopAllAudio, playExclusiveAudio } from '../utils/audioUtils';
+import { 
+  VOICE_OPTIONS, 
+  downloadAudioFile, 
+  adjustAudioSpeedAndDownload,
+  formatTime, 
+  downloadServerAudioDirect, 
+  stopAllAudio, 
+  playExclusiveAudio 
+} from '../utils/audioUtils';
 import { ShareAudioModal } from './ShareAudioModal';
 
 interface VoiceWorkshopProps {
@@ -81,6 +91,7 @@ export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
+  const [isDownloading, setIsDownloading] = useState<boolean>(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const hasAutoRunRef = useRef<boolean>(false);
@@ -152,10 +163,15 @@ export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
   };
 
   const handleSpeedChange = (speed: number) => {
-    setPlaybackSpeed(speed);
+    const rounded = Math.round(Math.max(0.5, Math.min(2.5, speed)) * 100) / 100;
+    setPlaybackSpeed(rounded);
     if (audioRef.current) {
-      audioRef.current.playbackRate = speed;
+      audioRef.current.playbackRate = rounded;
     }
+  };
+
+  const handleStepSpeed = (delta: number) => {
+    handleSpeedChange(playbackSpeed + delta);
   };
 
   const handleSeek = (newTime: number) => {
@@ -173,12 +189,22 @@ export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
     }
   };
 
-  const handleDownload = () => {
-    const filename = `VoiceCraft_${activeVoice}_Speech_${Date.now()}`;
-    if (generatedAudioUrl && generatedAudioUrl.startsWith('data:')) {
-      downloadAudioFile(generatedAudioUrl, filename);
-    } else {
-      downloadServerAudioDirect(scriptText, activeVoice, filename);
+  const handleDownload = async () => {
+    const speedSuffix = Math.abs(playbackSpeed - 1.0) < 0.01 ? '' : `_${playbackSpeed}x`;
+    const cleanSnippet = scriptText.slice(0, 20).replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `VoiceCraft_${activeVoice}_${cleanSnippet}${speedSuffix}_${Date.now()}`;
+    
+    setIsDownloading(true);
+    try {
+      if (generatedAudioUrl && generatedAudioUrl.startsWith('data:')) {
+        await adjustAudioSpeedAndDownload(generatedAudioUrl, filename, playbackSpeed);
+      } else {
+        await downloadServerAudioDirect(scriptText, activeVoice, filename);
+      }
+    } catch (err) {
+      console.error('Download error:', err);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -381,24 +407,77 @@ export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
                   </div>
                 </div>
 
-                {/* Speed Controls */}
-                <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800">
-                  <span>Playback Cadence:</span>
-                  <div className="flex items-center gap-1.5">
-                    {[0.75, 1.0, 1.25, 1.5, 2.0].map((rate) => (
+                {/* Speed Increase/Decrease & Download Bar */}
+                <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                  {/* Speed Adjuster */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-300 font-semibold">
+                      <Clock className="w-3.5 h-3.5 text-teal-400" />
+                      <span>Speed:</span>
+                      <span className="font-mono text-teal-300 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-750 text-xs font-bold">
+                        {playbackSpeed.toFixed(2).replace(/\.?0+$/, '')}x
+                      </span>
+                    </div>
+
+                    {/* Step buttons - and + */}
+                    <div className="flex items-center gap-0.5 bg-slate-900 p-0.5 rounded-xl border border-slate-800">
                       <button
-                        key={rate}
-                        onClick={() => handleSpeedChange(rate)}
-                        className={`px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
-                          playbackSpeed === rate
-                            ? 'bg-teal-500 text-slate-950 font-bold'
-                            : 'bg-slate-800 text-slate-400 hover:text-white'
-                        }`}
+                        onClick={() => handleStepSpeed(-0.1)}
+                        disabled={playbackSpeed <= 0.5}
+                        className="p-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                        title="Decrease playback speed (-0.1x)"
                       >
-                        {rate}x
+                        <Minus className="w-3.5 h-3.5" />
                       </button>
-                    ))}
+                      <span className="text-[10px] text-slate-500 font-mono px-1">adj</span>
+                      <button
+                        onClick={() => handleStepSpeed(0.1)}
+                        disabled={playbackSpeed >= 2.5}
+                        className="p-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                        title="Increase playback speed (+0.1x)"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Quick rate chips */}
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((rate) => (
+                        <button
+                          key={rate}
+                          onClick={() => handleSpeedChange(rate)}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                            Math.abs(playbackSpeed - rate) < 0.01
+                              ? 'bg-teal-500 text-slate-950 font-extrabold shadow-sm'
+                              : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800'
+                          }`}
+                        >
+                          {rate}x
+                        </button>
+                      ))}
+                    </div>
                   </div>
+
+                  {/* Download Audio Button */}
+                  <button
+                    id="workshop-download-mp3-btn"
+                    onClick={handleDownload}
+                    disabled={isDownloading}
+                    className="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 disabled:opacity-50 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 shadow-md shadow-teal-500/20 transition-all cursor-pointer active:scale-95"
+                    title={`Download audio rendered at ${playbackSpeed.toFixed(2).replace(/\.?0+$/, '')}x speed`}
+                  >
+                    {isDownloading ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Rendering...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Download Audio ({playbackSpeed.toFixed(2).replace(/\.?0+$/, '')}x)</span>
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
             </div>
