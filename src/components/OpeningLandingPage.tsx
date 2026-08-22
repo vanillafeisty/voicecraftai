@@ -23,6 +23,8 @@ interface OpeningLandingPageProps {
   onNavigateToWorkshop: () => void;
   selectedVoice: VoiceName;
   onSelectVoice: (voice: VoiceName) => void;
+  pluggedVoices?: VoiceName[];
+  onTogglePlugVoice?: (voice: VoiceName) => void;
   initialText?: string;
   initialPreset?: ContextPresetId;
   autoGenerate?: boolean;
@@ -61,6 +63,8 @@ export const OpeningLandingPage: React.FC<OpeningLandingPageProps> = ({
   onNavigateToWorkshop,
   selectedVoice,
   onSelectVoice,
+  pluggedVoices = ['Priya', 'Aarav', 'Sarah'],
+  onTogglePlugVoice,
   initialText,
   initialPreset = 'narrator',
   autoGenerate = false,
@@ -521,6 +525,7 @@ export const OpeningLandingPage: React.FC<OpeningLandingPageProps> = ({
                     onClick={() => {
                       setSandboxVoice(voice.id);
                       onSelectVoice(voice.id);
+                      onNavigateToConversation();
                     }}
                     className="text-xs text-teal-400 hover:text-teal-300 font-semibold cursor-pointer"
                   >

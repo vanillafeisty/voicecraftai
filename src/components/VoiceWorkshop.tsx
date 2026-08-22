@@ -14,15 +14,22 @@ import {
   Share2,
   RotateCcw,
   RotateCw,
-  Upload
+  Upload,
+  Zap,
+  Power,
+  Radio
 } from 'lucide-react';
-import { VoiceName } from '../types';
-import { VOICE_OPTIONS, downloadAudioFile, formatTime, downloadServerAudioDirect } from '../utils/audioUtils';
+import { VoiceName, MAX_PLUGGED_VOICES, MIN_PLUGGED_VOICES } from '../types';
+import { VOICE_OPTIONS, downloadAudioFile, formatTime, downloadServerAudioDirect, stopAllAudio, playExclusiveAudio } from '../utils/audioUtils';
 import { ShareAudioModal } from './ShareAudioModal';
 
 interface VoiceWorkshopProps {
   selectedVoice: VoiceName;
   onSelectVoice: (voice: VoiceName) => void;
+  pluggedVoices?: VoiceName[];
+  onPlugVoice?: (voice: VoiceName) => void;
+  onUnplugVoice?: (voice: VoiceName) => void;
+  onTogglePlugVoice?: (voice: VoiceName) => void;
   initialText?: string;
   initialVoice?: VoiceName;
   autoGenerate?: boolean;
@@ -55,6 +62,10 @@ const TEMPLATE_SCRIPTS = [
 export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
   selectedVoice,
   onSelectVoice,
+  pluggedVoices = ['Priya', 'Aarav', 'Sarah'],
+  onPlugVoice,
+  onUnplugVoice,
+  onTogglePlugVoice,
   initialText,
   initialVoice,
   autoGenerate = false,
@@ -73,6 +84,13 @@ export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const hasAutoRunRef = useRef<boolean>(false);
+
+  // Sync active voice when prop changes
+  useEffect(() => {
+    if (selectedVoice && selectedVoice !== activeVoice) {
+      setActiveVoice(selectedVoice);
+    }
+  }, [selectedVoice]);
 
   // Approximate metrics
   const wordCount = scriptText.trim().split(/\s+/).filter(Boolean).length;
@@ -185,13 +203,13 @@ export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
         <div className="space-y-1 max-w-xl">
           <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal-400">
             <Sliders className="w-3.5 h-3.5" />
-            <span>Power Studio</span>
+            <span>Power Studio • 2–3 Plugged Voices</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
             Voice Workshop & Speech Synthesizer
           </h1>
           <p className="text-xs sm:text-sm text-slate-400">
-            Fine-tune custom scripts, preview multiple voice timbres, adjust playback speed, share URLs, and download pristine MP3 files.
+            Fine-tune custom scripts, manage plugged-in voice profiles, adjust playback speed, share URLs, and download studio MP3 files.
           </p>
         </div>
 
@@ -389,15 +407,78 @@ export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
 
         {/* Right Column: Voice Selection & Settings */}
         <div className="space-y-6">
-          <div className="bg-slate-900 rounded-3xl border border-slate-800 p-6 shadow-xl space-y-4">
+          {/* Plugged Voices Rack in Workshop */}
+          <div className="bg-slate-900 rounded-3xl border border-slate-800 p-5 shadow-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                <Zap className="w-4 h-4 text-amber-400" />
+                <span>Plugged-In Voices ({pluggedVoices.length}/{MAX_PLUGGED_VOICES})</span>
+              </h2>
+              <span className="text-[10px] text-teal-300 font-bold">Active Slots</span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2">
+              {pluggedVoices.map((vId) => {
+                const v = VOICE_OPTIONS.find(vo => vo.id === vId);
+                const isCurrentActive = activeVoice === vId;
+
+                return (
+                  <div
+                    key={vId}
+                    onClick={() => {
+                      setActiveVoice(vId);
+                      onSelectVoice(vId);
+                    }}
+                    className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                      isCurrentActive
+                        ? 'bg-teal-500/20 border-teal-500 text-white shadow-md'
+                        : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${
+                        isCurrentActive ? 'border-teal-400 bg-teal-500' : 'border-slate-600'
+                      }`}>
+                        {isCurrentActive && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs text-white">{v?.name || vId}</div>
+                        <div className="text-[10px] text-slate-400">{v?.gender} • {v?.accent}</div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onTogglePlugVoice) onTogglePlugVoice(vId);
+                      }}
+                      disabled={pluggedVoices.length <= MIN_PLUGGED_VOICES}
+                      className={`p-1 rounded text-xs transition-colors cursor-pointer ${
+                        pluggedVoices.length <= MIN_PLUGGED_VOICES
+                          ? 'text-slate-600 cursor-not-allowed'
+                          : 'text-slate-400 hover:text-rose-400'
+                      }`}
+                      title="Disable / Unplug voice"
+                    >
+                      <Power className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Full Voice Library Selector */}
+          <div className="bg-slate-900 rounded-3xl border border-slate-800 p-5 shadow-xl space-y-4">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
               <Volume2 className="w-4 h-4 text-cyan-400" />
-              <span>Select Voice Profile</span>
+              <span>Full Voice Library</span>
             </h2>
 
-            <div className="space-y-2.5">
+            <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
               {VOICE_OPTIONS.map((voice) => {
                 const isSelected = activeVoice === voice.id;
+                const isPlugged = pluggedVoices.includes(voice.id);
 
                 return (
                   <div
@@ -407,9 +488,11 @@ export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
                       setActiveVoice(voice.id);
                       onSelectVoice(voice.id);
                     }}
-                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
+                    className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
                       isSelected
                         ? 'bg-teal-500/15 border-teal-500 text-white shadow-md'
+                        : isPlugged
+                        ? 'bg-slate-900 border-teal-500/40 text-slate-200'
                         : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:border-slate-700'
                     }`}
                   >
@@ -419,14 +502,36 @@ export const VoiceWorkshop: React.FC<VoiceWorkshopProps> = ({
                         <span className="text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded bg-slate-800 text-teal-300 border border-slate-700">
                           {voice.gender}
                         </span>
+                        {isPlugged && (
+                          <span className="text-[9px] px-1 py-0.2 rounded bg-teal-500/20 text-teal-300 font-bold">
+                            Plugged
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-slate-400">{voice.accent}</p>
                     </div>
 
-                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${
-                      isSelected ? 'border-teal-400 bg-teal-500 text-slate-950' : 'border-slate-700'
-                    }`}>
-                      {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onTogglePlugVoice) onTogglePlugVoice(voice.id);
+                        }}
+                        className={`p-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                          isPlugged
+                            ? 'bg-teal-500/20 text-teal-300 hover:bg-rose-950/40 hover:text-rose-300'
+                            : 'bg-slate-800 text-slate-400 hover:bg-teal-950/50 hover:text-teal-300'
+                        }`}
+                        title={isPlugged ? 'Disable voice' : 'Enable & Plug in voice'}
+                      >
+                        <Power className="w-3.5 h-3.5" />
+                      </button>
+
+                      <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${
+                        isSelected ? 'border-teal-400 bg-teal-500 text-slate-950' : 'border-slate-700'
+                      }`}>
+                        {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                      </div>
                     </div>
                   </div>
                 );

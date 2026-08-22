@@ -6,9 +6,12 @@ import {
   Sliders,
   Home,
   Share2,
-  FolderGit2
+  FolderGit2,
+  Check,
+  Zap,
+  Power
 } from 'lucide-react';
-import { VoiceName, AudioEngine } from '../types';
+import { VoiceName, AudioEngine, MAX_PLUGGED_VOICES } from '../types';
 import { VOICE_OPTIONS } from '../utils/audioUtils';
 import { DeployModal } from './DeployModal';
 import { ShareAudioModal } from './ShareAudioModal';
@@ -21,6 +24,9 @@ interface NavbarProps {
   setActiveTab: (tab: AppNavTab) => void;
   selectedVoice: VoiceName;
   onSelectVoice: (voice: VoiceName) => void;
+  pluggedVoices?: VoiceName[];
+  onTogglePlugVoice?: (voice: VoiceName) => void;
+  onUnplugVoice?: (voice: VoiceName) => void;
   audioEngine: AudioEngine;
   onSelectAudioEngine: (engine: AudioEngine) => void;
 }
@@ -30,6 +36,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActiveTab,
   selectedVoice,
   onSelectVoice,
+  pluggedVoices = ['Priya', 'Aarav', 'Sarah'],
+  onTogglePlugVoice,
+  onUnplugVoice,
 }) => {
   const [isDeployOpen, setIsDeployOpen] = useState<boolean>(false);
   const [isShareOpen, setIsShareOpen] = useState<boolean>(false);
@@ -105,8 +114,35 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             </nav>
 
-            {/* Right Controls: Share, Deploy, Voice Selector */}
+            {/* Right Controls: Plugged-In Voices Pills & Share & Voice Selector */}
             <div className="flex items-center gap-2 sm:gap-3">
+              {/* Plugged-in Voices Switcher (2-3 Voices) */}
+              <div className="hidden lg:flex items-center gap-1.5 bg-slate-950/80 px-2.5 py-1 rounded-2xl border border-slate-800 text-xs">
+                <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1 mr-1">
+                  <Zap className="w-3 h-3 text-amber-400" />
+                  <span>Plugged:</span>
+                </span>
+                {pluggedVoices.map((vName) => {
+                  const isActive = selectedVoice === vName;
+                  const vOpt = VOICE_OPTIONS.find(v => v.id === vName);
+                  return (
+                    <button
+                      key={vName}
+                      onClick={() => onSelectVoice(vName)}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                        isActive
+                          ? 'bg-teal-500 text-slate-950 shadow-sm ring-1 ring-teal-300'
+                          : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-700/60'
+                      }`}
+                      title={`${vName} (${vOpt?.tone || 'Voice'}) - Click to make active`}
+                    >
+                      {isActive && <span className="w-1.5 h-1.5 rounded-full bg-slate-950 animate-ping"></span>}
+                      <span>{vName}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
               {/* Share Button */}
               <button
                 id="nav-share-btn"
@@ -126,11 +162,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                 title="GitHub & Vercel Deployment Instructions"
               >
                 <FolderGit2 className="w-3.5 h-3.5 text-slate-400" />
-                <span className="hidden lg:inline">Deploy / Export</span>
+                <span className="hidden xl:inline">Deploy</span>
               </button>
 
-              {/* Quick Voice Selector */}
-              <div className="relative group hidden xl:block">
+              {/* Quick Voice Selector Dropdown */}
+              <div className="relative group">
                 <select
                   id="quick-voice-dropdown"
                   value={selectedVoice}
@@ -139,7 +175,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   {VOICE_OPTIONS.map((v) => (
                     <option key={v.id} value={v.id}>
-                      {v.name} ({v.gender})
+                      {v.name} ({v.gender}) {pluggedVoices.includes(v.id) ? '⚡' : ''}
                     </option>
                   ))}
                 </select>
@@ -202,3 +238,4 @@ export const Navbar: React.FC<NavbarProps> = ({
     </>
   );
 };
+

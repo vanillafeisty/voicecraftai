@@ -24,9 +24,22 @@ import {
   RotateCw,
   FileCheck,
   Zap,
-  Clock
+  Clock,
+  Power,
+  Sliders,
+  Plus
 } from 'lucide-react';
-import { VoiceName, VoiceRegion, VoiceGender, VoiceCategory, VoiceOption, ConversationMessage, VoicePersonalization } from '../types';
+import { 
+  VoiceName, 
+  VoiceRegion, 
+  VoiceGender, 
+  VoiceCategory, 
+  VoiceOption, 
+  ConversationMessage, 
+  VoicePersonalization,
+  MAX_PLUGGED_VOICES,
+  MIN_PLUGGED_VOICES 
+} from '../types';
 import { 
   VOICE_OPTIONS, 
   DEFAULT_PERSONALIZATION,
@@ -46,6 +59,10 @@ import { VoicePersonalizationPanel } from './VoicePersonalizationPanel';
 interface ConversationalAudioStudioProps {
   selectedVoice: VoiceName;
   onSelectVoice: (voice: VoiceName) => void;
+  pluggedVoices?: VoiceName[];
+  onPlugVoice?: (voice: VoiceName) => void;
+  onUnplugVoice?: (voice: VoiceName) => void;
+  onTogglePlugVoice?: (voice: VoiceName) => void;
   initialText?: string;
   autoGenerate?: boolean;
   autoDownload?: boolean;
@@ -55,7 +72,7 @@ const INITIAL_MESSAGES: ConversationMessage[] = [
   {
     id: 'msg-welcome',
     role: 'assistant',
-    text: 'Welcome to VoiceCraft AI! Type or paste any text below, choose an Indian or International voice (Stern, Flowing, Male, or Female), and it will automatically synthesize into lifelike speech ready to download as an MP3.',
+    text: 'Welcome to VoiceCraft AI! Type or paste any text below, select one of your 2–3 plugged-in voices, and it will synthesize into crystal-clear speech with instant MP3 download.',
     timestamp: 'Ready',
     voice: 'Priya',
   },
@@ -64,6 +81,10 @@ const INITIAL_MESSAGES: ConversationMessage[] = [
 export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps> = ({
   selectedVoice,
   onSelectVoice,
+  pluggedVoices = ['Priya', 'Aarav', 'Sarah'],
+  onPlugVoice,
+  onUnplugVoice,
+  onTogglePlugVoice,
   initialText,
   autoGenerate = false,
   autoDownload = false,
@@ -170,7 +191,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
     setMessages(prev => prev.map(m => m.id === msgId ? { ...m, isGenerating: true, error: undefined } : m));
 
     try {
-      const voiceOption = VOICE_OPTIONS.find(v => v.id === voiceName);
+      const voiceOption = VOICE_OPTIONS.find(v => v.id === voiceName) || VOICE_OPTIONS[0];
       let audioDataUrl = '';
       let audioDuration = Math.max(2, Math.round((text.split(/\s+/).filter(Boolean).length / 2.6) * 10) / 10);
 
@@ -192,7 +213,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
           }
         }
       } catch (networkErr) {
-        console.warn('Network TTS fetch issue, generating client fallback tone/audio:', networkErr);
+        console.warn('Network TTS fetch issue, generating fallback tone/audio:', networkErr);
       }
 
       // If backend was unreachable or returned empty, generate client-side audio so URL always exists!
@@ -218,7 +239,6 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
       }
 
       if (shouldAutoPlay) {
-        // STRICT SINGLE VOICE: Stop all other audio before playing exclusively
         stopAllAudio();
         if (audioRef.current && audioDataUrl) {
           const targetRate = voiceOption ? voiceOption.rate * personalization.speed : personalization.speed;
@@ -233,7 +253,6 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
       }
     } catch (err: any) {
       console.error('Error synthesizing speech:', err);
-      // Even on error, provide fallback audio so user can listen and download
       const fallbackUrl = generateClientAudioDataUrl(4);
       setMessages(prev => prev.map(m => m.id === msgId ? { 
         ...m, 
@@ -245,63 +264,27 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
   };
 
   /**
-   * Auto-generation when user selects or switches to a new voice:
-   * Plugs in and understands the text, then generates speech audio in the new voice immediately.
+   * Smooth Voice Switcher:
+   * Sets active voice, ensures it's plugged in, and notifies user without resetting or crashing UI.
    */
-  const handleSelectVoiceAndAutoGenerate = async (voice: VoiceOption) => {
+  const handleSelectVoiceSafely = (voice: VoiceOption) => {
     stopAllAudio();
-    onSelectVoice(voice.id);
-    
-    // Stop any playing sample audio
     if (sampleAudioRef.current) {
       sampleAudioRef.current.pause();
       setSamplePlayingVoiceId(null);
     }
 
-    const currentText = inputText.trim();
-    setVoiceNotice(`Plugged into ${voice.name} (${voice.tone}) - Single active audio channel`);
+    onSelectVoice(voice.id);
+    setVoiceNotice(`Active speaking voice set to ${voice.name} (${voice.tone})`);
     setTimeout(() => setVoiceNotice(null), 3000);
-
-    if (currentText) {
-      // If user has input text, create a message for it and autogenerate
-      const assistantMsgId = `asst-${Date.now()}`;
-      const asstMsg: ConversationMessage = {
-        id: assistantMsgId,
-        role: 'assistant',
-        text: currentText,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        voice: voice.id,
-        isGenerating: true,
-      };
-
-      setMessages(prev => [...prev, asstMsg]);
-      await generateAudioForMessage(assistantMsgId, currentText, voice.id, false, true);
-    } else {
-      // If input is empty, re-synthesize the latest message in the new voice
-      const lastMsg = [...messages].reverse().find(m => m.role === 'assistant');
-      if (lastMsg) {
-        const newMsgId = `asst-voice-switch-${Date.now()}`;
-        const newMsg: ConversationMessage = {
-          id: newMsgId,
-          role: 'assistant',
-          text: lastMsg.text,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          voice: voice.id,
-          isGenerating: true,
-        };
-        setMessages(prev => [...prev, newMsg]);
-        await generateAudioForMessage(newMsgId, lastMsg.text, voice.id, false, true);
-      }
-    }
   };
 
   /**
-   * Sample voice preview: plays the official sample line of that voice exclusively
+   * Sample voice preview
    */
   const handlePlayVoiceSample = async (voice: VoiceOption, e: React.MouseEvent) => {
     e.stopPropagation();
 
-    // If already playing this sample, pause it
     if (samplePlayingVoiceId === voice.id && sampleAudioRef.current) {
       if (!sampleAudioRef.current.paused) {
         sampleAudioRef.current.pause();
@@ -310,7 +293,6 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
       }
     }
 
-    // Stop every other audio immediately
     stopAllAudio();
     setActivePlayingId(null);
     setSamplePlayingVoiceId(voice.id);
@@ -364,7 +346,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
     const asstMsg: ConversationMessage = {
       id: assistantMsgId,
       role: 'assistant',
-      text: textToSend, // EXACT text transcription with no unwanted prefixes!
+      text: textToSend,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       voice: selectedVoice,
       isGenerating: true,
@@ -373,7 +355,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
     setMessages(prev => [...prev, userMsg, asstMsg]);
     setIsProcessing(false);
 
-    // Immediately generate audio for user's text and auto-play
+    // Generate audio for user's text and auto-play
     await generateAudioForMessage(assistantMsgId, textToSend, selectedVoice, false, true);
   };
 
@@ -383,7 +365,6 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
       return;
     }
 
-    // Toggle pause if currently playing this message
     if (activePlayingId === msg.id && audioRef.current) {
       if (!audioRef.current.paused) {
         audioRef.current.pause();
@@ -395,35 +376,25 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
       return;
     }
 
-    // Stop every other audio source first
     stopAllAudio();
     setSamplePlayingVoiceId(null);
 
     if (audioRef.current) {
-      const voiceOption = VOICE_OPTIONS.find(v => v.id === (msg.voice || selectedVoice));
-      const targetRate = voiceOption ? voiceOption.rate * personalization.speed : personalization.speed;
-      
-      playExclusiveAudio(audioRef.current, msg.audioUrl, targetRate, personalization.volume)
+      const voiceOption = VOICE_OPTIONS.find(v => v.id === (msg.voice || selectedVoice)) || VOICE_OPTIONS[0];
+      const targetRate = voiceOption.rate * personalization.speed;
+
+      audioRef.current.src = msg.audioUrl;
+      audioRef.current.playbackRate = targetRate;
+      audioRef.current.volume = personalization.volume;
+      audioRef.current.currentTime = 0;
+      audioRef.current.play()
         .then(() => {
           setActivePlayingId(msg.id);
         })
-        .catch(err => {
-          console.warn('Audio play error, fallback to single speech utterance:', err);
-          speakBrowserSpeech(msg.text, msg.voice || selectedVoice, targetRate, personalization.pitch, personalization.volume);
+        .catch((err) => {
+          console.warn('Playback error:', err);
           setActivePlayingId(msg.id);
         });
-    } else {
-      speakBrowserSpeech(msg.text, msg.voice || selectedVoice, personalization.speed, personalization.pitch, personalization.volume);
-      setActivePlayingId(msg.id);
-    }
-  };
-
-  const handleSpeedChange = (speed: number) => {
-    setPersonalization(prev => ({ ...prev, speed }));
-    if (audioRef.current) {
-      const activeMsg = messages.find(m => m.id === activePlayingId);
-      const voiceOption = VOICE_OPTIONS.find(v => v.id === (activeMsg?.voice || selectedVoice));
-      audioRef.current.playbackRate = voiceOption ? voiceOption.rate * speed : speed;
     }
   };
 
@@ -442,13 +413,56 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
     }
   };
 
+  const handleSpeedChange = (speed: number) => {
+    setPersonalization(prev => ({ ...prev, speed }));
+    if (audioRef.current) {
+      const activeMsg = messages.find(m => m.id === activePlayingId);
+      const voiceOption = VOICE_OPTIONS.find(v => v.id === (activeMsg?.voice || selectedVoice));
+      audioRef.current.playbackRate = voiceOption ? voiceOption.rate * speed : speed;
+    }
+  };
+
   const handleDownloadFullAudio = (msg: ConversationMessage) => {
-    const filename = `VoiceCraft_${msg.voice || selectedVoice}_Audio_${Date.now()}`;
+    const voiceToUse = msg.voice || selectedVoice;
+    const filename = `VoiceCraft_${voiceToUse}_Speech_${Date.now()}`;
     if (msg.audioUrl && msg.audioUrl.startsWith('data:')) {
       downloadAudioFile(msg.audioUrl, filename);
     } else {
-      downloadServerAudioDirect(msg.text, msg.voice || selectedVoice, filename);
+      downloadServerAudioDirect(msg.text, voiceToUse, filename);
     }
+  };
+
+  const handleCopyText = (msgId: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(msgId);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleClearChat = () => {
+    stopAllAudio();
+    setActivePlayingId(null);
+    setMessages([
+      {
+        id: `welcome-reset-${Date.now()}`,
+        role: 'assistant',
+        text: 'Studio cleared! Enter or paste any text below to synthesize speech.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        voice: selectedVoice,
+      }
+    ]);
+  };
+
+  const handleExportTranscript = () => {
+    const transcript = messages
+      .map(m => `[${m.timestamp}] ${m.role === 'user' ? 'USER' : `SPEAKER (${m.voice || selectedVoice})`}:\n${m.text}\n`)
+      .join('\n');
+    downloadText(transcript, `VoiceCraft_Transcript_${Date.now()}.txt`);
+  };
+
+  const handleLoad5000WordSample = () => {
+    setInputText(SAMPLE_5000_WORD_TEXT);
+    setUploadStatus('Loaded 5,000+ words full-length document sample into studio composer!');
+    setTimeout(() => setUploadStatus(null), 4000);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -456,110 +470,68 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
-      const content = evt.target?.result as string;
+    reader.onload = (ev) => {
+      const content = ev.target?.result as string;
       if (content) {
         setInputText(content);
-        const wCount = content.split(/\s+/).filter(Boolean).length;
-        setUploadStatus(`Loaded "${file.name}" (${wCount.toLocaleString()} words)`);
-        setTimeout(() => setUploadStatus(null), 4000);
+        const wCount = content.trim().split(/\s+/).filter(Boolean).length;
+        setUploadStatus(`Uploaded "${file.name}" (${wCount.toLocaleString()} words loaded)`);
+        setTimeout(() => setUploadStatus(null), 5000);
       }
     };
     reader.readAsText(file);
     e.target.value = '';
   };
 
-  const handleLoad5000WordSample = () => {
-    setInputText(SAMPLE_5000_WORD_TEXT);
-    const wCount = SAMPLE_5000_WORD_TEXT.split(/\s+/).filter(Boolean).length;
-    setUploadStatus(`Loaded 5,000+ word clinical operations demo (${wCount.toLocaleString()} words)`);
-    setTimeout(() => setUploadStatus(null), 4000);
-  };
-
-  const handleCopyText = (id: string, text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  const handleClearChat = () => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
-    if (sampleAudioRef.current) {
-      sampleAudioRef.current.pause();
-    }
-    setActivePlayingId(null);
-    setSamplePlayingVoiceId(null);
-    setMessages(INITIAL_MESSAGES);
-  };
-
-  const handleExportTranscript = () => {
-    const transcriptText = messages
-      .map(m => `[${m.timestamp}] ${m.role === 'assistant' ? `VoiceCraft (${m.voice || 'Voice'})` : 'User'}:\n${m.text}\n`)
-      .join('\n---\n\n');
-    downloadText(transcriptText, `VoiceCraft_Transcript_${Date.now()}.txt`, 'text/plain');
-  };
-
-  const getToneBadgeStyle = (tone: string) => {
-    switch (tone) {
-      case 'Stern & Firm':
-        return 'bg-amber-950/60 text-amber-300 border-amber-800/60';
-      case 'Flowing & Warm':
-        return 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60';
-      case 'Authoritative':
-        return 'bg-purple-950/60 text-purple-300 border-purple-800/60';
-      case 'Corporate Direct':
-        return 'bg-blue-950/60 text-blue-300 border-blue-800/60';
-      case 'Smooth Broadcast':
-        return 'bg-cyan-950/60 text-cyan-300 border-cyan-800/60';
-      default:
-        return 'bg-teal-950/60 text-teal-300 border-teal-800/60';
-    }
-  };
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isProcessing]);
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto pb-10">
-      {/* Hidden Audio Player for Speech Playback */}
+    <div className="space-y-6 max-w-5xl mx-auto">
+      {/* Hidden Master Audio Players */}
       <audio
         ref={audioRef}
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 4)}
-        onEnded={() => setActivePlayingId(null)}
+        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || duration)}
+        onEnded={() => {
+          setActivePlayingId(null);
+          setCurrentTime(0);
+        }}
+        onError={() => setActivePlayingId(null)}
       />
-
-      {/* Hidden Audio Player for Voice Sample Previews */}
       <audio
         ref={sampleAudioRef}
         onEnded={() => setSamplePlayingVoiceId(null)}
+        onError={() => setSamplePlayingVoiceId(null)}
       />
 
-      {/* Hidden File Input for .txt/.md/.doc upload */}
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileUpload} 
-        accept=".txt,.md,.doc,.docx,.json,.csv" 
-        className="hidden" 
+      {/* Hidden File Input for document upload */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+        accept=".txt,.md,.rtf,.text"
+        className="hidden"
       />
 
-      {/* Top Header Card */}
-      <div className="bg-slate-900 rounded-3xl border border-slate-800 p-4 sm:p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-teal-500 to-cyan-500 flex items-center justify-center text-slate-950 font-bold shadow-lg shadow-teal-500/20">
-            <Mic2 className="w-5 h-5" />
+      {/* Studio Header & Action Bar */}
+      <div className="bg-slate-900 rounded-3xl border border-slate-800 p-5 sm:p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-teal-600 to-cyan-600 flex items-center justify-center text-white shadow-lg shadow-teal-500/20">
+            <Mic2 className="w-6 h-6" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
                 Speech Synthesis & MP3 Studio
               </h1>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                Single Plug-in Audio
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/40">
+                {pluggedVoices.length} Voices Plugged In
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              Select and personalize exactly one active voice to transcribe and download crystal-clear continuous MP3 audio without voice collision
+              Plug in 2–3 voices, enable/disable anytime, and transcribe continuous high-fidelity MP3 speech.
             </p>
           </div>
         </div>
@@ -605,13 +577,17 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
         </div>
       </div>
 
-      {/* Voice Personalization & Single Plug-in Suite */}
+      {/* Voice Personalization & 2-3 Plugged-in Voices Panel */}
       <VoicePersonalizationPanel
         selectedVoice={selectedVoice}
         onSelectVoice={(v) => {
           stopAllAudio();
           onSelectVoice(v);
         }}
+        pluggedVoices={pluggedVoices}
+        onPlugVoice={onPlugVoice}
+        onUnplugVoice={onUnplugVoice}
+        onTogglePlugVoice={onTogglePlugVoice}
         personalization={personalization}
         onUpdatePersonalization={(patch) => setPersonalization(prev => ({ ...prev, ...patch }))}
         onResetPersonalization={() => {
@@ -648,9 +624,6 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
               id="filter-region-indian"
               onClick={() => {
                 setSelectedRegion('Indian');
-                if (!['Ananya', 'Kabir', 'Deepa', 'Rohan', 'Aarav', 'Kavita', 'Priya', 'Vikram'].includes(selectedVoice)) {
-                  onSelectVoice('Ananya');
-                }
               }}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                 selectedRegion === 'Indian'
@@ -664,9 +637,6 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
               id="filter-region-intl"
               onClick={() => {
                 setSelectedRegion('International');
-                if (!['Oliver', 'Eleanor', 'Fenrir', 'Sarah', 'James', 'Kore', 'Arthur'].includes(selectedVoice)) {
-                  onSelectVoice('Oliver');
-                }
               }}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                 selectedRegion === 'International'
@@ -727,7 +697,6 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
             }`}
           >
             <span>📖 Storytelling</span>
-            <span className="text-[10px] opacity-80">(Real Humanized)</span>
           </button>
 
           <button
@@ -740,7 +709,6 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
             }`}
           >
             <span>🎙️ Narrative</span>
-            <span className="text-[10px] opacity-80">(Documentary & News)</span>
           </button>
 
           <button
@@ -753,24 +721,26 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
             }`}
           >
             <span>📋 Descriptive</span>
-            <span className="text-[10px] opacity-80">(Briefings & Explainer)</span>
           </button>
         </div>
 
-        {/* Voice Cards Grid with Sample Previews */}
+        {/* Voice Cards Grid with Sample Previews and Enable/Disable Controls */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {filteredVoices.map((v) => {
             const isSelected = selectedVoice === v.id;
+            const isPlugged = pluggedVoices.includes(v.id);
             const isPlayingSample = samplePlayingVoiceId === v.id;
 
             return (
               <div
                 key={v.id}
                 id={`voice-card-${v.id}`}
-                onClick={() => handleSelectVoiceAndAutoGenerate(v)}
+                onClick={() => handleSelectVoiceSafely(v)}
                 className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-2.5 group relative ${
                   isSelected
-                    ? 'bg-teal-950/30 border-teal-500 text-teal-100 shadow-lg shadow-teal-500/15 ring-1 ring-teal-500/50'
+                    ? 'bg-teal-950/40 border-teal-500 text-teal-100 shadow-lg shadow-teal-500/15 ring-1 ring-teal-500/50'
+                    : isPlugged
+                    ? 'bg-slate-900/80 hover:bg-slate-850 border-teal-500/40 text-slate-200 shadow-sm'
                     : v.isHumanized
                     ? 'bg-slate-950/80 hover:bg-slate-850 border-amber-500/30 text-slate-300 hover:border-amber-400/60 shadow-sm'
                     : 'bg-slate-950/70 hover:bg-slate-850 border-slate-800 text-slate-300 hover:border-slate-700'
@@ -791,8 +761,8 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                         {v.gender}
                       </span>
                       {v.isHumanized && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-teal-500/20 text-amber-300 border border-amber-500/50 shadow-sm animate-pulse">
-                          ✨ Real Humanized
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-teal-500/20 text-amber-300 border border-amber-500/50 shadow-sm">
+                          ✨ Humanized
                         </span>
                       )}
                     </div>
@@ -805,10 +775,28 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                     </div>
                   </div>
 
-                  {/* Tone Badge */}
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${getToneBadgeStyle(v.tone)}`}>
-                    {v.tone}
-                  </span>
+                  {/* Enable / Disable Plug Toggle */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onTogglePlugVoice) {
+                        onTogglePlugVoice(v.id);
+                      } else if (isPlugged && onUnplugVoice) {
+                        onUnplugVoice(v.id);
+                      } else if (!isPlugged && onPlugVoice) {
+                        onPlugVoice(v.id);
+                      }
+                    }}
+                    className={`px-2 py-1 rounded-xl text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                      isPlugged
+                        ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40 hover:bg-rose-950/50 hover:text-rose-300 hover:border-rose-500/40'
+                        : 'bg-slate-800 text-slate-400 hover:bg-teal-950/60 hover:text-teal-300 border border-slate-700'
+                    }`}
+                    title={isPlugged ? 'Click to Disable/Unplug' : 'Click to Enable/Plug In'}
+                  >
+                    <Power className="w-3 h-3" />
+                    <span>{isPlugged ? 'Plugged' : 'Enable'}</span>
+                  </button>
                 </div>
 
                 {/* Accent & Description */}
@@ -823,7 +811,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                   <span className="text-teal-400 font-bold shrink-0">”</span>
                 </div>
 
-                {/* Bottom Row: Sample Voice Play Button & Plug-In Indicator */}
+                {/* Bottom Row: Sample Voice Play Button & Plug-In Status */}
                 <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60 text-xs">
                   {/* Sample Voice Button */}
                   <button
@@ -853,7 +841,11 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                     {isSelected ? (
                       <span className="text-teal-300 flex items-center gap-1">
                         <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" />
-                        <span>Plugged In</span>
+                        <span>Active Speaker</span>
+                      </span>
+                    ) : isPlugged ? (
+                      <span className="text-teal-400 group-hover:text-teal-300">
+                        Plugged In • Click to Select
                       </span>
                     ) : (
                       <span className="text-slate-500 group-hover:text-slate-300">
@@ -1055,7 +1047,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
                                 key={rate}
                                 onClick={() => handleSpeedChange(rate)}
                                 className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                                  playbackSpeed === rate
+                                  personalization.speed === rate
                                     ? 'bg-teal-500 text-slate-950'
                                     : 'bg-slate-800 text-slate-400 hover:text-white'
                                 }`}
@@ -1124,6 +1116,34 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
           </div>
         </div>
 
+        {/* Quick Active Voice Selector Chips (From Plugged-In Voices) */}
+        <div className="flex items-center gap-2 flex-wrap bg-slate-950 p-2 rounded-2xl border border-slate-800 text-xs">
+          <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1 mr-1">
+            <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <span>Speak With:</span>
+          </span>
+          {pluggedVoices.map((vName) => {
+            const isSelected = selectedVoice === vName;
+            const vOpt = VOICE_OPTIONS.find(v => v.id === vName);
+            return (
+              <button
+                key={vName}
+                onClick={() => onSelectVoice(vName)}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer ${
+                  isSelected
+                    ? 'bg-teal-500 text-slate-950 shadow-md ring-1 ring-teal-300'
+                    : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-700 hover:border-slate-600'
+                }`}
+                title={`Generate audio using ${vName} (${vOpt?.gender}, ${vOpt?.tone})`}
+              >
+                {isSelected ? <Check className="w-3 h-3 stroke-[3]" /> : <Radio className="w-3 h-3 text-slate-500" />}
+                <span>{vName}</span>
+                <span className="text-[10px] opacity-75 font-normal">({vOpt?.gender})</span>
+              </button>
+            );
+          })}
+        </div>
+
         <div className="relative">
           <textarea
             id="conversation-input-textarea"
@@ -1154,7 +1174,7 @@ export const ConversationalAudioStudio: React.FC<ConversationalAudioStudioProps>
 
         <div className="flex items-center justify-between text-xs text-slate-500 px-2">
           <span>Active Voice: <strong className="text-teal-300">{selectedVoice}</strong> ({selectedRegion})</span>
-          <span>Tip: Selecting any voice above will plug in and autogenerate speech</span>
+          <span>Tip: Switch between your {pluggedVoices.length} plugged-in voices anytime</span>
         </div>
       </div>
 

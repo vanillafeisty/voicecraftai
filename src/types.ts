@@ -105,3 +105,13 @@ export interface TextToSpeechResponse {
   engine: string;
   error?: string;
 }
+
+export const MAX_PLUGGED_VOICES = 3;
+export const MIN_PLUGGED_VOICES = 1;
+export const DEFAULT_PLUGGED_VOICES: VoiceName[] = ['Priya', 'Aarav', 'Sarah'];
+
+export interface MultiVoiceSettings {
+  pluggedVoices: VoiceName[];
+  activeVoice: VoiceName;
+}
+
