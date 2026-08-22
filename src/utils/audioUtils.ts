@@ -530,8 +530,86 @@ export function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
 }
 
 /**
- * Stretches/resamples audio to the target playback speed and downloads the resulting audio file.
- * If speed is 1.0, downloads the original audio directly.
+ * Pitch-preserving time stretch (WSOLA: Waveform Similarity Overlap-Add).
+ * Speeds up or slows down audio duration while strictly preserving vocal pitch and timbre.
+ * Guarantees that downloaded audio at different speeds sounds identical to browser player.
+ */
+export function timeStretchPitchPreserved(
+  inputBuffer: AudioBuffer,
+  speed: number,
+  audioCtx: BaseAudioContext
+): AudioBuffer {
+  if (Math.abs(speed - 1.0) < 0.01) {
+    return inputBuffer;
+  }
+
+  const numChannels = inputBuffer.numberOfChannels;
+  const sampleRate = inputBuffer.sampleRate;
+  const inputLen = inputBuffer.length;
+  const outputLen = Math.max(1, Math.round(inputLen / speed));
+
+  const outputBuffer = audioCtx.createBuffer(numChannels, outputLen, sampleRate);
+
+  // Frame size ~25ms-30ms is optimal for speech fundamental frequency
+  const windowSize = Math.min(2048, Math.max(512, Math.pow(2, Math.round(Math.log2(sampleRate * 0.028)))));
+  const hopOut = Math.floor(windowSize / 2);
+  const hopIn = Math.round(hopOut * speed);
+
+  // Smooth Hann window for artifact-free crossfading
+  const window = new Float32Array(windowSize);
+  for (let i = 0; i < windowSize; i++) {
+    window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (windowSize - 1)));
+  }
+
+  for (let c = 0; c < numChannels; c++) {
+    const inputData = inputBuffer.getChannelData(c);
+    const outputData = outputBuffer.getChannelData(c);
+
+    let inPos = 0;
+    let outPos = 0;
+    const maxSearchOffset = Math.floor(windowSize / 4);
+
+    while (outPos + windowSize < outputLen && inPos + windowSize + maxSearchOffset < inputLen) {
+      let bestOffset = 0;
+      let maxCorr = -Infinity;
+
+      if (outPos > 0) {
+        for (let offset = -maxSearchOffset; offset <= maxSearchOffset; offset++) {
+          const testPos = inPos + offset;
+          if (testPos < 0 || testPos + windowSize >= inputLen) continue;
+
+          let corr = 0;
+          for (let i = 0; i < windowSize; i += 4) {
+            corr += inputData[testPos + i] * outputData[outPos + i - hopOut];
+          }
+          if (corr > maxCorr) {
+            maxCorr = corr;
+            bestOffset = offset;
+          }
+        }
+      }
+
+      const optimalInPos = Math.max(0, Math.min(inputLen - windowSize, inPos + bestOffset));
+
+      for (let i = 0; i < windowSize; i++) {
+        outputData[outPos + i] += inputData[optimalInPos + i] * window[i];
+      }
+
+      outPos += hopOut;
+      inPos += hopIn;
+    }
+
+    // Normalize output bounds
+    for (let i = 0; i < outputLen; i++) {
+      outputData[i] = Math.max(-1.0, Math.min(1.0, outputData[i]));
+    }
+  }
+
+  return outputBuffer;
+}
+
+/**
+ * Downloads the exact audio heard in the browser with pitch-preserved speed adjustment.
  */
 export async function adjustAudioSpeedAndDownload(
   audioDataUrlOrBlob: string,
@@ -539,19 +617,19 @@ export async function adjustAudioSpeedAndDownload(
   speed = 1.0
 ): Promise<void> {
   const cleanBase = baseName.replace(/\.(wav|mp3)$/i, '');
-  const speedLabel = speed === 1.0 ? '' : `_${speed}x`;
+  const speedLabel = Math.abs(speed - 1.0) < 0.01 ? '' : `_${speed}x`;
   const filename = `${cleanBase}${speedLabel}.wav`;
 
   if (!audioDataUrlOrBlob) return;
 
-  // If standard 1.0x speed, use standard instant download
+  // If 1.0x standard speed, directly download the pristine original file immediately!
   if (Math.abs(speed - 1.0) < 0.01) {
     downloadAudioFile(audioDataUrlOrBlob, cleanBase);
     return;
   }
 
   try {
-    // 1. Fetch data url into ArrayBuffer
+    // 1. Fetch data URL into ArrayBuffer
     const res = await fetch(audioDataUrlOrBlob);
     const arrayBuf = await res.arrayBuffer();
 
@@ -564,30 +642,13 @@ export async function adjustAudioSpeedAndDownload(
 
     const tempCtx = new AudioCtxClass();
     const decodedBuffer = await tempCtx.decodeAudioData(arrayBuf);
+
+    // 3. Apply pitch-preserving time stretch
+    const stretchedBuffer = timeStretchPitchPreserved(decodedBuffer, speed, tempCtx);
     await tempCtx.close();
 
-    // 3. Render at new playback speed with OfflineAudioContext
-    const numChannels = decodedBuffer.numberOfChannels;
-    const sampleRate = decodedBuffer.sampleRate;
-    const outputLength = Math.max(1, Math.ceil(decodedBuffer.length / speed));
-
-    const OfflineCtxClass = window.OfflineAudioContext || (window as any).webkitOfflineAudioContext;
-    if (!OfflineCtxClass) {
-      downloadAudioFile(audioDataUrlOrBlob, `${cleanBase}_${speed}x`);
-      return;
-    }
-
-    const offlineCtx = new OfflineCtxClass(numChannels, outputLength, sampleRate);
-    const source = offlineCtx.createBufferSource();
-    source.buffer = decodedBuffer;
-    source.playbackRate.value = speed;
-    source.connect(offlineCtx.destination);
-    source.start(0);
-
-    const renderedBuffer = await offlineCtx.startRendering();
-
-    // 4. Encode renderedBuffer into standard 16-bit PCM WAV Blob
-    const wavBlob = audioBufferToWavBlob(renderedBuffer);
+    // 4. Encode stretched buffer into standard 16-bit PCM WAV Blob
+    const wavBlob = audioBufferToWavBlob(stretchedBuffer);
     const blobUrl = URL.createObjectURL(wavBlob);
 
     const link = document.createElement('a');
@@ -602,7 +663,7 @@ export async function adjustAudioSpeedAndDownload(
       URL.revokeObjectURL(blobUrl);
     }, 3000);
   } catch (err) {
-    console.warn('Audio speed render fallback, downloading original file:', err);
+    console.warn('Pitch-preserved audio stretch fallback, downloading original file:', err);
     downloadAudioFile(audioDataUrlOrBlob, `${cleanBase}_${speed}x`);
   }
 }

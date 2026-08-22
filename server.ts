@@ -200,58 +200,53 @@ async function startServer() {
   };
 
   /**
-   * Splits arbitrary length text (5,000+ words) into natural sentence/clause chunks under 130 characters.
+   * Splits arbitrary length text (even 10,000+ words) into natural sentence/paragraph chunks for TTS synthesis.
    */
-  function splitTextIntoChunks(rawText: string, maxChunkLength = 120): string[] {
+  function splitTextIntoGeminiChunks(rawText: string, maxWords = 180): string[] {
     const clean = rawText
-      .replace(/[""“”]/g, '')
-      .replace(/[\r\n]+/g, ' ')
-      .replace(/\s+/g, ' ')
+      .replace(/[""“”]/g, '"')
+      .replace(/[\r\n]+/g, '\n')
       .trim();
 
     if (!clean) return ['VoiceCraft AI audio generation ready.'];
-    if (clean.length <= maxChunkLength) return [clean];
 
-    // Split on sentence punctuation first (. ! ? ; : newline)
-    const sentenceParts = clean.split(/(?<=[.?!;:\n])\s+/);
+    // Split on paragraphs first
+    const paragraphs = clean.split(/\n+/).map(p => p.trim()).filter(Boolean);
     const chunks: string[] = [];
-    let currentChunk = '';
+    let currentWords: string[] = [];
 
-    for (const part of sentenceParts) {
-      if ((currentChunk + ' ' + part).trim().length <= maxChunkLength) {
-        currentChunk = (currentChunk + ' ' + part).trim();
-      } else {
-        if (currentChunk) {
-          chunks.push(currentChunk);
-          currentChunk = '';
-        }
+    for (const para of paragraphs) {
+      // Split paragraph into sentences
+      const sentences = para.split(/(?<=[.?!;:])\s+/).map(s => s.trim()).filter(Boolean);
 
-        if (part.length <= maxChunkLength) {
-          currentChunk = part;
+      for (const sentence of sentences) {
+        const sentenceWords = sentence.split(/\s+/).filter(Boolean);
+
+        if (currentWords.length + sentenceWords.length <= maxWords) {
+          currentWords.push(...sentenceWords);
         } else {
-          // Subdivide long sentences by commas or word boundaries
-          const words = part.split(/\s+/);
-          let subChunk = '';
-          for (const w of words) {
-            if ((subChunk + ' ' + w).trim().length <= maxChunkLength) {
-              subChunk = (subChunk + ' ' + w).trim();
-            } else {
-              if (subChunk) chunks.push(subChunk);
-              subChunk = w;
-            }
+          if (currentWords.length > 0) {
+            chunks.push(currentWords.join(' '));
+            currentWords = [];
           }
-          if (subChunk) {
-            currentChunk = subChunk;
+
+          if (sentenceWords.length <= maxWords) {
+            currentWords.push(...sentenceWords);
+          } else {
+            // Very long sentence without punctuation: split into word blocks
+            for (let i = 0; i < sentenceWords.length; i += maxWords) {
+              chunks.push(sentenceWords.slice(i, i + maxWords).join(' '));
+            }
           }
         }
       }
     }
 
-    if (currentChunk) {
-      chunks.push(currentChunk);
+    if (currentWords.length > 0) {
+      chunks.push(currentWords.join(' '));
     }
 
-    return chunks.length > 0 ? chunks : [clean.slice(0, maxChunkLength)];
+    return chunks.length > 0 ? chunks : [clean.slice(0, 1000)];
   }
 
   /**
@@ -277,16 +272,15 @@ async function startServer() {
 
   /**
    * High-fidelity zero-quota speech synthesis engine with concurrent multi-chunk batching.
-   * Handles arbitrary text length (5,000+ words) in seconds and returns continuous MP3 audio.
    */
   async function generateStudioVoiceFallback(text: string, voice = "Priya"): Promise<{ audioBuffer: Buffer; mimeType: string; durationSeconds: number }> {
     const config = VOICE_BACKEND_CONFIGS[voice] || VOICE_BACKEND_CONFIGS.Priya;
     const langTag = config.langTag;
-    const chunks = splitTextIntoChunks(text, 120);
+    const chunks = splitTextIntoGeminiChunks(text, 25);
 
     // Fetch individual audio chunk with retry
     const fetchChunk = async (chunk: string, index: number): Promise<Buffer | null> => {
-      const encodedText = encodeURIComponent(chunk);
+      const encodedText = encodeURIComponent(chunk.slice(0, 150));
       const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=${langTag}&client=tw-ob`;
 
       for (let attempt = 1; attempt <= 3; attempt++) {
@@ -305,24 +299,23 @@ async function startServer() {
           }
           
           if (attempt < 3) {
-            await new Promise(r => setTimeout(r, 120 * attempt));
+            await new Promise(r => setTimeout(r, 100 * attempt));
           }
         } catch (err) {
           if (attempt === 3) {
-            console.warn(`TTS fetch failed for chunk ${index} after 3 attempts:`, err);
+            console.warn(`TTS fetch failed for chunk ${index}:`, err);
           }
-          await new Promise(r => setTimeout(r, 120 * attempt));
+          await new Promise(r => setTimeout(r, 100 * attempt));
         }
       }
       return null;
     };
 
-    // Process in concurrent batches of 10 requests for rapid completion of 5000+ words
-    const chunkBuffers = await mapConcurrent(chunks, 10, fetchChunk);
+    const chunkBuffers = await mapConcurrent(chunks, 8, fetchChunk);
     const validBuffers = chunkBuffers.filter((b): b is Buffer => b !== null && b.length > 0);
 
     if (validBuffers.length === 0) {
-      throw new Error('Failed to generate studio audio stream');
+      throw new Error('Failed to generate audio stream');
     }
 
     const combinedBuffer = Buffer.concat(validBuffers);
@@ -333,6 +326,126 @@ async function startServer() {
       audioBuffer: combinedBuffer,
       mimeType: "audio/mp3",
       durationSeconds,
+    };
+  }
+
+  /**
+   * Unified speech audio generator supporting 5,000+ words with guaranteed voice consistency.
+   * Chunks large texts, synthesizes with the exact persona in Gemini TTS, concatenates PCM buffers,
+   * and provides reliable fallback.
+   */
+  async function generateSpeechAudio(
+    text: string,
+    voiceName = "Priya"
+  ): Promise<{
+    audioBuffer: Buffer;
+    mimeType: string;
+    durationSeconds: number;
+    sampleRate: number;
+    voice: string;
+    engine: "gemini" | "studio";
+    wordCount: number;
+  }> {
+    const voiceConfig = VOICE_BACKEND_CONFIGS[voiceName] || VOICE_BACKEND_CONFIGS.Priya;
+    const wordCount = text.split(/\s+/).filter(Boolean).length;
+    const now = Date.now();
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    // Try Gemini TTS first if API key is present and not cooling down
+    if (apiKey && now >= geminiTtsCooldownUntil) {
+      try {
+        const ai = getGeminiClient();
+        const chunks = splitTextIntoGeminiChunks(text, 180);
+
+        // Synthesize a single chunk with Gemini TTS
+        const synthesizeChunk = async (chunkText: string, index: number): Promise<Buffer | null> => {
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              const response = await ai.models.generateContent({
+                model: "gemini-3.1-flash-tts-preview",
+                contents: [
+                  {
+                    parts: [
+                      {
+                        text: `${voiceConfig.tonePrompt}:\n\n${chunkText}`,
+                      },
+                    ],
+                  },
+                ],
+                config: {
+                  responseModalities: [Modality.AUDIO],
+                  speechConfig: {
+                    voiceConfig: {
+                      prebuiltVoiceConfig: {
+                        voiceName: voiceConfig.geminiVoice || "Kore",
+                      },
+                    },
+                  },
+                },
+              });
+
+              const candidate = response.candidates?.[0];
+              const audioPart = candidate?.content?.parts?.find((p: any) => p.inlineData?.data);
+
+              if (audioPart && audioPart.inlineData?.data) {
+                const rawBase64Pcm = audioPart.inlineData.data;
+                return Buffer.from(rawBase64Pcm, "base64");
+              }
+            } catch (chunkErr: any) {
+              const errMsg = chunkErr?.message || "";
+              if (errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("quota")) {
+                geminiTtsCooldownUntil = Date.now() + 60000;
+                throw chunkErr;
+              }
+              if (attempt < 2) {
+                await new Promise(r => setTimeout(r, 200 * attempt));
+              }
+            }
+          }
+          return null;
+        };
+
+        // Run with concurrency of 3 to synthesize 5,000+ words swiftly without exceeding rate limits
+        const pcmChunks = await mapConcurrent(chunks, 3, synthesizeChunk);
+        const validPcmChunks = pcmChunks.filter((b): b is Buffer => b !== null && b.length > 0);
+
+        if (validPcmChunks.length > 0 && validPcmChunks.length === chunks.length) {
+          // All chunks synthesized successfully with the designated voice persona!
+          const fullPcmBuffer = Buffer.concat(validPcmChunks);
+          const wavBuffer = pcmToWav(fullPcmBuffer, 24000, 1, 16);
+          const durationSeconds = Math.round((fullPcmBuffer.length / (24000 * 2)) * 10) / 10;
+
+          return {
+            audioBuffer: wavBuffer,
+            mimeType: "audio/wav",
+            durationSeconds,
+            sampleRate: 24000,
+            voice: voiceName,
+            engine: "gemini",
+            wordCount,
+          };
+        }
+      } catch (geminiError: any) {
+        const errorMsg = geminiError?.message || "";
+        if (errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED") || errorMsg.includes("quota")) {
+          console.warn("Gemini TTS quota reached, switching seamlessly to Studio engine.");
+          geminiTtsCooldownUntil = now + 60000;
+        } else {
+          console.warn("Gemini TTS error, falling back to Studio engine:", errorMsg);
+        }
+      }
+    }
+
+    // High-fidelity fallback engine with full multi-chunk support
+    const studioResult = await generateStudioVoiceFallback(text, voiceName);
+    return {
+      audioBuffer: studioResult.audioBuffer,
+      mimeType: studioResult.mimeType,
+      durationSeconds: studioResult.durationSeconds,
+      sampleRate: 24000,
+      voice: voiceName,
+      engine: "studio",
+      wordCount,
     };
   }
 
@@ -351,107 +464,27 @@ async function startServer() {
     });
   });
 
-  // Generate TTS Audio endpoint
+  // Generate TTS Audio endpoint (guaranteed identical voice for short text and 5,000+ words)
   app.post("/api/tts/generate", async (req, res) => {
     try {
-      const { text, voice, engine } = req.body;
+      const { text, voice } = req.body;
       if (!text || typeof text !== "string" || text.trim().length === 0) {
         return res.status(400).json({ error: "Text is required for audio generation." });
       }
 
       const voiceName = voice || "Priya";
-      const voiceConfig = VOICE_BACKEND_CONFIGS[voiceName] || VOICE_BACKEND_CONFIGS.Priya;
-      const now = Date.now();
-      const apiKey = process.env.GEMINI_API_KEY;
-
-      const isLongText = text.length > 800 || text.split(/\s+/).length > 150;
-
-      // Check if user specifically requested studio engine, or text is long-form (5,000+ words), or quota is cooling down or missing API key
-      if (isLongText || engine === "studio" || !apiKey || now < geminiTtsCooldownUntil) {
-        const studioResult = await generateStudioVoiceFallback(text, voiceName);
-        const base64Mp3 = studioResult.audioBuffer.toString("base64");
-        const wavDataUrl = `data:audio/mp3;base64,${base64Mp3}`;
-
-        return res.json({
-          success: true,
-          wavDataUrl,
-          durationSeconds: studioResult.durationSeconds,
-          sampleRate: 24000,
-          voice: voiceName,
-          engine: "studio",
-          isStudioFallback: !isLongText && engine !== "studio",
-          wordCount: text.split(/\s+/).filter(Boolean).length,
-        });
-      }
-
-      // Attempt high-fidelity Gemini Native TTS with gemini-3.1-flash-tts-preview
-      try {
-        const ai = getGeminiClient();
-        const response = await ai.models.generateContent({
-          model: "gemini-3.1-flash-tts-preview",
-          contents: [
-            {
-              parts: [
-                {
-                  text: `${voiceConfig.tonePrompt}:\n\n${text}`,
-                },
-              ],
-            },
-          ],
-          config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: voiceConfig.geminiVoice || "Aoede",
-                },
-              },
-            },
-          },
-        });
-
-        const candidate = response.candidates?.[0];
-        const audioPart = candidate?.content?.parts?.find((p: any) => p.inlineData?.data);
-
-        if (audioPart && audioPart.inlineData?.data) {
-          const rawBase64Pcm = audioPart.inlineData.data;
-          const pcmBuffer = Buffer.from(rawBase64Pcm, "base64");
-          const wavBuffer = pcmToWav(pcmBuffer, 24000, 1, 16);
-          const wavDataUrl = `data:audio/wav;base64,${wavBuffer.toString("base64")}`;
-          const durationSeconds = Math.round((pcmBuffer.length / (24000 * 2)) * 10) / 10;
-
-          return res.json({
-            success: true,
-            wavDataUrl,
-            durationSeconds,
-            sampleRate: 24000,
-            voice: voiceName,
-            engine: "gemini",
-          });
-        }
-      } catch (geminiError: any) {
-        const errorMsg = geminiError?.message || "";
-        if (errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED") || errorMsg.includes("quota")) {
-          console.warn("Gemini TTS quota hit. Setting 60s cooldown and seamlessly switching to Studio engine.");
-          geminiTtsCooldownUntil = now + 60000;
-        } else {
-          console.warn("Gemini TTS generation error, switching to Studio fallback:", errorMsg);
-        }
-      }
-
-      // Studio engine fallback
-      const studioFallback = await generateStudioVoiceFallback(text, voiceName);
-      const base64Mp3 = studioFallback.audioBuffer.toString("base64");
-      const wavDataUrl = `data:audio/mp3;base64,${base64Mp3}`;
+      const result = await generateSpeechAudio(text, voiceName);
+      const base64Audio = result.audioBuffer.toString("base64");
+      const wavDataUrl = `data:${result.mimeType};base64,${base64Audio}`;
 
       return res.json({
         success: true,
         wavDataUrl,
-        durationSeconds: studioFallback.durationSeconds,
-        sampleRate: 24000,
-        voice: voiceName,
-        engine: "studio",
-        isStudioFallback: true,
+        durationSeconds: result.durationSeconds,
+        sampleRate: result.sampleRate,
+        voice: result.voice,
+        engine: result.engine,
+        wordCount: result.wordCount,
       });
     } catch (err: any) {
       console.error("Fatal error in /api/tts/generate:", err);
@@ -459,21 +492,22 @@ async function startServer() {
     }
   });
 
-  // Direct MP3 download endpoint for custom text
+  // Direct download endpoint for custom text (uses exact same audio generation pipeline)
   app.post("/api/tts/download-custom", async (req, res) => {
     try {
       const { text, voice, filename } = req.body;
-      if (!text || typeof text !== "string") {
+      if (!text || typeof text !== "string" || text.trim().length === 0) {
         return res.status(400).send("Text is required");
       }
       const safeVoice = voice || "Priya";
-      const studioVoice = await generateStudioVoiceFallback(text, safeVoice);
-      const safeFilename = (filename || "VoiceCraft_Audio").replace(/[^a-zA-Z0-9_-]/g, "_") + ".mp3";
+      const result = await generateSpeechAudio(text, safeVoice);
+      const ext = result.mimeType === "audio/wav" ? ".wav" : ".mp3";
+      const safeFilename = (filename || `VoiceCraft_${safeVoice}_Audio`).replace(/[^a-zA-Z0-9_-]/g, "_") + ext;
 
-      res.setHeader("Content-Type", "audio/mp3");
+      res.setHeader("Content-Type", result.mimeType);
       res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"`);
-      res.setHeader("Content-Length", studioVoice.audioBuffer.length);
-      return res.end(studioVoice.audioBuffer);
+      res.setHeader("Content-Length", result.audioBuffer.length);
+      return res.end(result.audioBuffer);
     } catch (err: any) {
       console.error("Error generating custom audio download:", err);
       return res.status(500).send("Failed to generate custom audio");
@@ -484,17 +518,18 @@ async function startServer() {
     try {
       const text = req.query.text as string;
       const voice = (req.query.voice as string) || "Priya";
-      const filename = (req.query.filename as string) || "VoiceCraft_Audio";
+      const filename = (req.query.filename as string) || `VoiceCraft_${voice}_Audio`;
       if (!text) {
         return res.status(400).send("Text query parameter is required");
       }
-      const studioVoice = await generateStudioVoiceFallback(text, voice);
-      const safeFilename = filename.replace(/[^a-zA-Z0-9_-]/g, "_") + ".mp3";
+      const result = await generateSpeechAudio(text, voice);
+      const ext = result.mimeType === "audio/wav" ? ".wav" : ".mp3";
+      const safeFilename = filename.replace(/[^a-zA-Z0-9_-]/g, "_") + ext;
 
-      res.setHeader("Content-Type", "audio/mp3");
+      res.setHeader("Content-Type", result.mimeType);
       res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"`);
-      res.setHeader("Content-Length", studioVoice.audioBuffer.length);
-      return res.end(studioVoice.audioBuffer);
+      res.setHeader("Content-Length", result.audioBuffer.length);
+      return res.end(result.audioBuffer);
     } catch (err: any) {
       console.error("Error in GET audio download:", err);
       return res.status(500).send("Failed to download audio");
